@@ -27,8 +27,13 @@ class _MapViewState extends State<MapView> {
     return StreamBuilder<AccelerationData>(
       stream: locationService.locationStreamController.stream,
       builder: (context, snapshot) {
-        return Transform.translate(
-          offset: Offset(0, snapshot.hasData ? -snapshot.data!.acceleration * 5 : 0),
+        return Transform(
+          alignment: Alignment.center,
+          transform: Matrix4.identity()
+            ..setEntry(3, 2, 0.001)
+            ..rotateX(
+              snapshot.hasData ? pi * snapshot.data!.acceleration/(2* (snapshot.data!.acceleration + 200)) : 0, // 0ms - 0 degree, 200ms - 45 degree, infinite ms - 90 degree
+            ),
           child: OSMFlutter(
             controller: controller,
             osmOption: OSMOption(
@@ -42,8 +47,8 @@ class _MapViewState extends State<MapView> {
                 unFollowUser: false,
               ),
               zoomOption: ZoomOption(
-                minZoomLevel: 8,
-                maxZoomLevel: 18,
+                minZoomLevel: 2,
+                maxZoomLevel: 19,
                 initZoom: 10,
               ),
             ),
@@ -87,7 +92,11 @@ class _MapViewState extends State<MapView> {
       debugPrint(
         "Received location update: ${accelerationData.point.latitude}, ${accelerationData.point.longitude}, Speed: ${accelerationData.speed}, Acceleration: ${accelerationData.acceleration}",
       );
-      controller.setZoom(zoomLevel: 8 +  accelerationData.speed/10);
+      controller.setZoom(zoomLevel: 2 + locationService.zoomForSpeed(accelerationData.speed)); //  + (10 - accelerationData.speed / 10)  0-17 log zooming
+      controller.moveTo(GeoPoint(
+        latitude: accelerationData.point.latitude,
+        longitude: accelerationData.point.longitude,
+      ), animate: true);
     });
     Timer.periodic(Duration(seconds: 5), (timer) {
       locationService.fakespeed =

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_osm_plugin/flutter_osm_plugin.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:orbitx/dto/location_dto.dart';
@@ -10,6 +11,31 @@ class LocationService {
   late StreamController<AccelerationData> locationStreamController;
   LocationService() {
     locationStreamController = StreamController<AccelerationData>.broadcast();
+    Geolocator.requestPermission().then((permission) {
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
+        Geolocator.getCurrentPosition(
+          locationSettings: LocationSettings(accuracy: LocationAccuracy.high),
+        ).then((position) {
+          final timestamp = DateTime.now();
+          final acc = AccelerationData(
+            point: GeoPoint(
+              latitude: position.latitude,
+              longitude: position.longitude,
+            ),
+            acceleration: 0.0,
+            speed: position.speed,
+            timestamp: timestamp,
+            altitude: position.altitude,
+          );
+          locationStreamController.add(acc);
+          acceleration = acc;
+        });
+      } else {
+        // Handle permission denial
+        debugPrint("Location permission denied");
+      }
+    });
   }
 
   AccelerationData acceleration = AccelerationData(
@@ -37,7 +63,7 @@ class LocationService {
           acceleration.altitude,
           speed *
               periodicUpdateIntervalSeconds /
-              3600.0, // distance = speed * time
+              1000, // distance = speed * time
           acceleration.speed,
         );
         locationStreamController.add(acc);
@@ -174,5 +200,15 @@ class LocationService {
       altitude: altitude + deltaAltitudeKm * 1000.0,
       speed: speed,
     );
+  }
+
+  double zoomForSpeed(double speedMps) {
+    const double maxZoom = 17.0;
+    const double maxSpeed = 1000000.0; // 1000 km/s
+
+    final double zoom =
+        maxZoom * (1.0 - (log(speedMps + 1) / ln2) / (log(maxSpeed + 1) / ln2));
+
+    return zoom.clamp(0.0, maxZoom);
   }
 }
