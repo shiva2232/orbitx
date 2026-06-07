@@ -22,6 +22,7 @@ class _MapViewState extends State<MapView> {
       unFollowUser: false,
     ),
   );
+  bool simulate = false;
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<AccelerationData>(
@@ -115,7 +116,7 @@ class _MapViewState extends State<MapView> {
             Positioned(
               top: 20,
               right: 20,
-              height: MediaQuery.of(context).size.height - 80,
+              height: MediaQuery.of(context).size.height - 120,
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.grey.withAlpha(50),
@@ -131,15 +132,16 @@ class _MapViewState extends State<MapView> {
                     thumbColor: Colors.yellow,
                     secondaryActiveColor: Colors.red,
                     value: snapshot.hasData
-                        ? snapshot.data!.zoomOveride !=-1 ? snapshot.data!.zoomOveride : snapshot.data!.speed.clamp(0, 17)
-                              .toDouble()
+                        ? snapshot.data!.zoomOveride != -1
+                              ? snapshot.data!.zoomOveride
+                              : snapshot.data!.speed.clamp(0, 17).toDouble()
                         : 5.0,
                     min: 0,
                     max: 17,
                     divisions: 170,
                     label: "Zoom",
                     onChanged: (value) {
-                      locationService.fakeZoom=value;
+                      locationService.fakeZoom = value;
                     },
                     onChangeStart: (value) {
                       locationService.fakeZoom = value; // Simulate zoom changes
@@ -189,8 +191,9 @@ class _MapViewState extends State<MapView> {
         .init()
         .then((_) {
           debugPrint("Location service initialized");
-
-          locationService.fakespeed = Random().nextDouble() * 100;
+          if (simulate) {
+            locationService.fakespeed = Random().nextDouble() * 100;
+          }
           locationService.startLocationUpdates();
           locationService.locationStreamController.stream.listen((
             accelerationData,
@@ -199,8 +202,9 @@ class _MapViewState extends State<MapView> {
               "Received location update: ${accelerationData.point.latitude}, ${accelerationData.point.longitude}, Speed: ${accelerationData.speed}, Acceleration: ${accelerationData.acceleration}",
             );
             controller.setZoom(
-              zoomLevel: accelerationData.zoomOveride !=-1 ? 17-accelerationData.zoomOveride :
-                  2 + locationService.zoomForSpeed(accelerationData.speed),
+              zoomLevel: accelerationData.zoomOveride != -1
+                  ? 17 - accelerationData.zoomOveride
+                  : 2 + locationService.zoomForSpeed(accelerationData.speed),
             ); //  + (10 - accelerationData.speed / 10)  0-17 log zooming
             controller.moveTo(
               GeoPoint(
@@ -210,11 +214,13 @@ class _MapViewState extends State<MapView> {
               animate: true,
             );
           });
-          Timer.periodic(Duration(seconds: 5), (timer) {
-            locationService.fakespeed =
-                Random().nextDouble() * 1; // Simulate speed changes
-            debugPrint("Fake speed updated: ${locationService.speed}");
-          });
+          if (simulate) {
+            Timer.periodic(Duration(seconds: 5), (timer) {
+              locationService.fakespeed =
+                  Random().nextDouble() * 1; // Simulate speed changes
+              debugPrint("Fake speed updated: ${locationService.speed}");
+            });
+          }
         })
         .catchError((error) {
           debugPrint("Error initializing location service: $error");

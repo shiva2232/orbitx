@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:orbitx/helper/database.dart';
+import 'package:orbitx/services/action_service.dart';
 
 class ScriptPage extends StatefulWidget {
   const ScriptPage({super.key});
@@ -12,6 +13,7 @@ class ScriptPage extends StatefulWidget {
 
 class _ScriptPageState extends State<ScriptPage> {
   List<Map<String, dynamic>> _scripts = List.empty(growable: true);
+  late ActionService actionService;
 
   @override
   Widget build(BuildContext context) {
@@ -20,20 +22,41 @@ class _ScriptPageState extends State<ScriptPage> {
         ..._scripts.map<Widget>(
           (data) => ListTile(
             leading: const Icon(Icons.code),
-            title: Text(data['command'], style: const TextStyle(color: Colors.white)),
+            title: Text(
+              data['command'],
+              style: const TextStyle(color: Colors.white),
+            ),
             onTap: () {
               List<String> parts = data['command'].toString().split(' ');
-              var result = Process.run(parts[0], parts.sublist(1), runInShell: true);
-              result.then(
-                (value) => ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text(value.stdout, style: const TextStyle(color: Colors.white)))),
-              );
-              result.catchError((error) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text(error.toString(), style: const TextStyle(color: Colors.white))));
-              });
+              if (actionService.availableActions[parts[0]] != null) {
+                actionService.start(data['command']);
+              } else {
+                var result = Process.run(
+                  parts[0],
+                  parts.sublist(1),
+                  runInShell: true,
+                );
+                result.then(
+                  (value) => ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        value.stdout,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                );
+                result.catchError((error) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        error.toString(),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  );
+                });
+              }
             },
             onLongPress: () {
               showDialog(
@@ -49,11 +72,19 @@ class _ScriptPageState extends State<ScriptPage> {
                     TextButton(
                       onPressed: () {
                         DatabaseHelper.database.then((db) {
-                          db.delete('scripts', where: 'id = ?', whereArgs: [data['id']]).then((_) {
-                            setState(() {
-                              _scripts.removeWhere((script) => script['id'] == data['id']);
-                            });
-                          });
+                          db
+                              .delete(
+                                'scripts',
+                                where: 'id = ?',
+                                whereArgs: [data['id']],
+                              )
+                              .then((_) {
+                                setState(() {
+                                  _scripts.removeWhere(
+                                    (script) => script['id'] == data['id'],
+                                  );
+                                });
+                              });
                         });
                         Navigator.pop(context);
                       },
@@ -120,6 +151,7 @@ class _ScriptPageState extends State<ScriptPage> {
   @override
   void initState() {
     super.initState();
+    actionService = ActionService();
     // Load scripts from a source (e.g., local storage, database, etc.)
     DatabaseHelper.database.then((db) {
       // Fetch scripts from the database and update the UI
