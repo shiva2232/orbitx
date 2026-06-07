@@ -27,8 +27,8 @@ class _MapViewState extends State<MapView> {
     return StreamBuilder<AccelerationData>(
       stream: locationService.locationStreamController.stream,
       builder: (context, snapshot) {
-        return Transform.rotate(
-          angle: snapshot.hasData ? snapshot.data!.acceleration : 0,
+        return Transform.translate(
+          offset: Offset(0, snapshot.hasData ? -snapshot.data!.acceleration * 5 : 0),
           child: OSMFlutter(
             controller: controller,
             osmOption: OSMOption(
@@ -87,7 +87,7 @@ class _MapViewState extends State<MapView> {
       debugPrint(
         "Received location update: ${accelerationData.point.latitude}, ${accelerationData.point.longitude}, Speed: ${accelerationData.speed}, Acceleration: ${accelerationData.acceleration}",
       );
-      controller.setZoom(zoomLevel: accelerationData.speed);
+      controller.setZoom(zoomLevel: 8 +  accelerationData.speed/10);
     });
     Timer.periodic(Duration(seconds: 5), (timer) {
       locationService.fakespeed =
