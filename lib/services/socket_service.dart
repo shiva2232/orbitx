@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -24,7 +25,7 @@ class SocketService{
   }
 
   void send(Packet packet){
-    _socket?.add(packet.toBytes());
+    _socket?.add(utf8.encode("${jsonEncode(packet.toMap())}\n"));
   }
 
   bool get isRunning {

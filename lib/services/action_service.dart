@@ -14,7 +14,7 @@ class ActionService {
       }
     },
     "snd": (List<String> parts){
-      List<String> message=parts.join('').split(':');
+      List<String> message=parts.join(' ').split(':');
       Packet packet=Packet(command: message[0], success: message[1], failure: message[2]);
       service.send(packet);
       return Future.value(true);
