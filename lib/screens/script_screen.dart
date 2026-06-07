@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:orbitx/helper/database.dart';
 import 'package:orbitx/services/action_service.dart';
+import 'package:orbitx/services/socket_service.dart';
 
 class ScriptPage extends StatefulWidget {
   const ScriptPage({super.key});
@@ -13,8 +14,7 @@ class ScriptPage extends StatefulWidget {
 
 class _ScriptPageState extends State<ScriptPage> {
   List<Map<String, dynamic>> _scripts = List.empty(growable: true);
-  late ActionService actionService;
-
+ 
   @override
   Widget build(BuildContext context) {
     return ListView(
@@ -26,10 +26,20 @@ class _ScriptPageState extends State<ScriptPage> {
               data['command'],
               style: const TextStyle(color: Colors.white),
             ),
-            onTap: () {
+            onTap: () async {
               List<String> parts = data['command'].toString().split(' ');
-              if (actionService.availableActions[parts[0]] != null) {
-                actionService.start(data['command']);
+              if (ActionService.availableActions[parts[0]] != null) {
+                final bool status=await ActionService.start(data['command']);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        status? 'success': 'failed',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                
               } else {
                 var result = Process.run(
                   parts[0],
@@ -43,6 +53,7 @@ class _ScriptPageState extends State<ScriptPage> {
                         value.stdout,
                         style: const TextStyle(color: Colors.white),
                       ),
+                      duration: const Duration(seconds: 1),
                     ),
                   ),
                 );
@@ -53,6 +64,7 @@ class _ScriptPageState extends State<ScriptPage> {
                         error.toString(),
                         style: const TextStyle(color: Colors.white),
                       ),
+                      duration: const Duration(seconds: 1),
                     ),
                   );
                 });
@@ -151,7 +163,7 @@ class _ScriptPageState extends State<ScriptPage> {
   @override
   void initState() {
     super.initState();
-    actionService = ActionService();
+
     // Load scripts from a source (e.g., local storage, database, etc.)
     DatabaseHelper.database.then((db) {
       // Fetch scripts from the database and update the UI
@@ -167,6 +179,7 @@ class _ScriptPageState extends State<ScriptPage> {
   @override
   void dispose() {
     super.dispose();
+    service.destroy();
     DatabaseHelper.database.then((db) {
       // db.close();
     });

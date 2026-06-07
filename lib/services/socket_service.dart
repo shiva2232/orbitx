@@ -7,7 +7,7 @@ import 'package:orbitx/dto/packet_dto.dart';
 
 
 class SocketService{
-  late Socket? _socket;
+  Socket? _socket;
   late StreamSubscription<Uint8List>? _subs;
   Future<bool> connect(String address, int port)async {
     try{
@@ -27,9 +27,16 @@ class SocketService{
     _socket?.add(packet.toBytes());
   }
 
+  bool get isRunning {
+    return _socket!=null;
+  }
+
   void destroy(){
     _subs?.cancel();
     _socket?.destroy();
     _socket=null;
   }
 }
+
+
+final SocketService service = SocketService();
