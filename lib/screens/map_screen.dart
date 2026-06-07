@@ -32,7 +32,11 @@ class _MapViewState extends State<MapView> {
           transform: Matrix4.identity()
             ..setEntry(3, 2, 0.001)
             ..rotateX(
-              snapshot.hasData ? pi * snapshot.data!.acceleration/(2* (snapshot.data!.acceleration + 200)) : 0, // 0ms - 0 degree, 200ms - 45 degree, infinite ms - 90 degree
+              snapshot.hasData
+                  ? pi *
+                        snapshot.data!.acceleration /
+                        (2 * (snapshot.data!.acceleration + 200))
+                  : 0, // 0ms - 0 degree, 200ms - 45 degree, infinite ms - 90 degree
             ),
           child: OSMFlutter(
             controller: controller,
@@ -85,23 +89,40 @@ class _MapViewState extends State<MapView> {
     super.dispose();
   }
 
-  void listenToLocationUpdates() {
-    locationService.fakespeed = Random().nextDouble() * 100;
-    locationService.startLocationUpdates();
-    locationService.locationStreamController.stream.listen((accelerationData) {
-      debugPrint(
-        "Received location update: ${accelerationData.point.latitude}, ${accelerationData.point.longitude}, Speed: ${accelerationData.speed}, Acceleration: ${accelerationData.acceleration}",
-      );
-      controller.setZoom(zoomLevel: 2 + locationService.zoomForSpeed(accelerationData.speed)); //  + (10 - accelerationData.speed / 10)  0-17 log zooming
-      controller.moveTo(GeoPoint(
-        latitude: accelerationData.point.latitude,
-        longitude: accelerationData.point.longitude,
-      ), animate: true);
-    });
-    Timer.periodic(Duration(seconds: 5), (timer) {
-      locationService.fakespeed =
-          Random().nextDouble() * 100; // Simulate speed changes
-      debugPrint("Fake speed updated: ${locationService.speed}");
-    });
+  void listenToLocationUpdates() async {
+    locationService
+        .init()
+        .then((_) {
+          debugPrint("Location service initialized");
+
+          locationService.fakespeed = Random().nextDouble() * 100;
+          locationService.startLocationUpdates();
+          locationService.locationStreamController.stream.listen((
+            accelerationData,
+          ) {
+            debugPrint(
+              "Received location update: ${accelerationData.point.latitude}, ${accelerationData.point.longitude}, Speed: ${accelerationData.speed}, Acceleration: ${accelerationData.acceleration}",
+            );
+            controller.setZoom(
+              zoomLevel:
+                  2 + locationService.zoomForSpeed(accelerationData.speed),
+            ); //  + (10 - accelerationData.speed / 10)  0-17 log zooming
+            controller.moveTo(
+              GeoPoint(
+                latitude: accelerationData.point.latitude,
+                longitude: accelerationData.point.longitude,
+              ),
+              animate: true,
+            );
+          });
+          Timer.periodic(Duration(seconds: 5), (timer) {
+            locationService.fakespeed =
+                Random().nextDouble() * 100; // Simulate speed changes
+            debugPrint("Fake speed updated: ${locationService.speed}");
+          });
+        })
+        .catchError((error) {
+          debugPrint("Error initializing location service: $error");
+        });
   }
 }

@@ -11,6 +11,10 @@ class LocationService {
   late StreamController<AccelerationData> locationStreamController;
   LocationService() {
     locationStreamController = StreamController<AccelerationData>.broadcast();
+  }
+
+  Future<void> init() {
+    final completer = Completer<void>();
     Geolocator.requestPermission().then((permission) {
       if (permission == LocationPermission.always ||
           permission == LocationPermission.whileInUse) {
@@ -30,12 +34,14 @@ class LocationService {
           );
           locationStreamController.add(acc);
           acceleration = acc;
+          completer.complete();
         });
       } else {
         // Handle permission denial
         debugPrint("Location permission denied");
       }
     });
+    return completer.future;
   }
 
   AccelerationData acceleration = AccelerationData(
