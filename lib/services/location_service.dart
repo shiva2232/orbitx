@@ -9,6 +9,17 @@ class LocationService {
   double speed = 0.0;
   int periodicUpdateIntervalSeconds = 1;
   late StreamController<AccelerationData> locationStreamController;
+  double zoomOveride = -1.0;
+  
+  AccelerationData acceleration = AccelerationData(
+    point: GeoPoint(latitude: 0.0, longitude: 0.0),
+    acceleration: 0.0,
+    speed: 0.0,
+    timestamp: DateTime.now(),
+    altitude: 411.0,
+    zoomOveride: -1.0,
+  );
+
   LocationService() {
     locationStreamController = StreamController<AccelerationData>.broadcast();
   }
@@ -31,6 +42,7 @@ class LocationService {
             speed: position.speed,
             timestamp: timestamp,
             altitude: position.altitude,
+            zoomOveride: zoomOveride,
           );
           locationStreamController.add(acc);
           acceleration = acc;
@@ -42,20 +54,6 @@ class LocationService {
       }
     });
     return completer.future;
-  }
-
-  AccelerationData acceleration = AccelerationData(
-    point: GeoPoint(latitude: 0.0, longitude: 0.0),
-    acceleration: 0.0,
-    speed: 0.0,
-    timestamp: DateTime.now(),
-    altitude: 411.0,
-  );
-
-  Future<String> getCurrentLocation() async {
-    // Simulate fetching location data
-    await Future.delayed(Duration(seconds: 2));
-    return "Latitude: 37.7749, Longitude: -122.4194"; // Example coordinates
   }
 
   void startLocationUpdates() {
@@ -103,6 +101,7 @@ class LocationService {
               speed: position.speed,
               timestamp: timestamp,
               altitude: position.altitude,
+              zoomOveride: zoomOveride,
             );
             locationStreamController.add(acc);
             acceleration = acc;
@@ -205,16 +204,21 @@ class LocationService {
       timestamp: DateTime.now(),
       altitude: altitude + deltaAltitudeKm * 1000.0,
       speed: speed,
+      zoomOveride: zoomOveride,
     );
   }
 
   double zoomForSpeed(double speedMps) {
     const double maxZoom = 17.0;
-    const double maxSpeed = 1000000.0; // 1000 km/s
+    const double maxSpeed = 6371000.0; // 1000 km/s
 
     final double zoom =
         maxZoom * (1.0 - (log(speedMps + 1) / ln2) / (log(maxSpeed + 1) / ln2));
 
     return zoom.clamp(0.0, maxZoom);
+  }
+
+  set fakeZoom(double zoom) {
+    zoomOveride = zoom;
   }
 }

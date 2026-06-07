@@ -7,6 +7,7 @@ class AccelerationData {
   final double speed;
   final DateTime timestamp;
   final double altitude;
+  final double zoomOveride;
 
   AccelerationData({
     required this.point,
@@ -14,6 +15,7 @@ class AccelerationData {
     required this.speed,
     required this.timestamp,
     required this.altitude,
+    required this.zoomOveride,
   });
 
   factory AccelerationData.fromMap(Map<String, dynamic> map) {
@@ -23,6 +25,7 @@ class AccelerationData {
       speed: (map['speed'] as num).toDouble(),
       timestamp: map['timestamp'] as DateTime,
       altitude: (map['altitude'] as num).toDouble(),
+      zoomOveride: (map['zoomOveride'] as num).toDouble(),
     );
   }
 
@@ -33,6 +36,7 @@ class AccelerationData {
       'speed': speed,
       'timestamp': timestamp,
       'altitude': altitude,
+      'zoomOveride': zoomOveride,
     };
   }
 }
