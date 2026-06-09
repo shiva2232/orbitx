@@ -23,11 +23,40 @@ class _MapViewState extends State<MapView> {
     ),
   );
   bool simulate = false;
+  bool _dialogShowing = false;
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<AccelerationData>(
       stream: locationService.locationStreamController.stream,
       builder: (context, snapshot) {
+        if (snapshot.hasData &&
+            snapshot.data!.acceleration.abs() >= 29.4 &&  // 3 * 9.81(gravity)
+            !_dialogShowing) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            _dialogShowing = true;
+
+            await showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                title: const Text('Possible Accident'),
+                content: Text(
+                  'Detected acceleration: '
+                  '${snapshot.data!.acceleration.toStringAsFixed(2)} m/s²',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('I am OK'),
+                  ),
+                ],
+              ),
+            );
+
+            _dialogShowing = false;
+          });
+        }
+        ;
         return Stack(
           children: [
             Transform(
@@ -39,7 +68,7 @@ class _MapViewState extends State<MapView> {
                       ? pi *
                             snapshot.data!.acceleration /
                             (2 * (snapshot.data!.acceleration + 200))
-                      : 0, // 0ms - 0 degree, 200ms - 45 degree, infinite ms - 90 degree
+                      : 0, // 0m/s^2 - 0 degree, 200m/s^2 - 45 degree, infinite m/s^2 - 90 degree
                 ),
               child: OSMFlutter(
                 controller: controller,
@@ -105,8 +134,10 @@ class _MapViewState extends State<MapView> {
                     elevation: 10,
                   ),
                   onPressed: () {
-                    locationService.fakespeed =
-                        Random().nextDouble() * 100; // Simulate speed changes
+                    locationService.fakespeed = locationService.speed == 100
+                        ? 0
+                        : 100;
+                    // Random().nextDouble() * 100; // Simulate speed changes
                     debugPrint("Fake speed updated: ${locationService.speed}");
                   },
                   child: const Text("End Auto Navigation"),
