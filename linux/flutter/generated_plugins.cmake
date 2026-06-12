@@ -3,7 +3,6 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  permission_manager
   url_launcher_linux
 )
 

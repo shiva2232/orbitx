@@ -1,7 +1,9 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:installed_apps/app_info.dart';
 import 'package:installed_apps/installed_apps.dart';
+import 'package:orbitx/firebase_options.dart';
 import 'package:orbitx/screens/apps_screen.dart';
 import 'dart:io';
 
@@ -13,6 +15,9 @@ void main() async {
   //   SystemChrome.setEnabledSystemUIMode(
   //   SystemUiMode.edgeToEdge,
   // );
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const MyApp());
 }

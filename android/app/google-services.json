@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "467512100442",
+    "firebase_url": "https://orbitx-os-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "orbitx-os",
+    "storage_bucket": "orbitx-os.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:467512100442:android:916a577312390c983a3a63",
+        "android_client_info": {
+          "package_name": "com.shiva2232.orbitx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAfK_IX4uLX4rpVjzKr5apyiOFkOXO5_Rw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

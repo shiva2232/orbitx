@@ -1,11 +1,16 @@
 plugins {
     id("com.android.application")
+    // START: FlutterFire Configuration
+    id("com.google.gms.google-services")
+    // END: FlutterFire Configuration
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.shiva2232.orbitx"
+    // Use a newer compileSdk to satisfy plugin AAR metadata (camera/core requires API 34+)
+    // compileSdk = 36
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
