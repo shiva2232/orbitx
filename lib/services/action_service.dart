@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:orbitx/dto/packet_dto.dart';
@@ -57,7 +56,6 @@ class ActionService {
 
   static Future<bool> start(String command, context) async {
     final parts = command.split(' ');
-    debugPrint(parts.join() + command + "\n\n\n\n");
     if (ActionService.availableActions[parts[0]] != null) {
       final bool status = await availableActions[parts[0]]?.call(
         parts.sublist(1),
@@ -79,6 +77,8 @@ class ActionService {
             duration: const Duration(seconds: 1),
           ),
         );
+
+        return true;
       } catch (error) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -89,8 +89,9 @@ class ActionService {
             duration: const Duration(seconds: 1),
           ),
         );
+
+        return false;
       }
     }
-    return await availableActions[parts[0]]?.call(parts.sublist(1));
   }
 }

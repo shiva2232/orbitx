@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:orbitx/helper/database.dart';
 import 'package:orbitx/services/action_service.dart';
@@ -36,7 +34,7 @@ class _ScriptPageState extends State<ScriptPage> {
                         color: snapshot.hasData
                             ? snapshot.data!
                                   ? Colors.green
-                                  : Colors.red
+                                  : service.isRunning ? Colors.green : Colors.red
                             : Colors.yellow,
                         shape: BoxShape.circle,
                       ),

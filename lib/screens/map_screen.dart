@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_osm_plugin/flutter_osm_plugin.dart';
 import 'package:mobile_scanner/mobile_scanner.dart' as ms;
 import 'package:orbitx/helper/location_group.dart' as lg;
@@ -309,7 +308,7 @@ class _MapViewState extends State<MapView> {
     _connectedUsersSubscription?.cancel();
     _connectedUsersSubscription = eventTrackingService.usersStream.listen((users) {
       if (!mounted) return;
-      final casted = (users as List).cast<lg.UserLocation>();
+      final casted = (users).cast<lg.UserLocation>();
       setState(() {
         _connectedUsers = casted;
       });

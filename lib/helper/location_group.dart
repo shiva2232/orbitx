@@ -56,12 +56,12 @@ class EventTrackingService {
     _eventId = eventId;
     _userName = userName;
 
-    _userRef = _db.ref('events/$eventId/users/$userName');
+    _userRef = _db.ref('events/$_eventId/users/$userName');
 
     _subscription?.cancel();
 
     _subscription = _db
-        .ref('events/$eventId/users')
+        .ref('events/$_eventId/users')
         .onValue
         .listen(_handleUsersUpdate);
 

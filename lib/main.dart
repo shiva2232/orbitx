@@ -78,16 +78,19 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           final result = Process.run('termux-battery-status', []);
-
-          result.then(
-            (value) => ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text(value.stdout))),
-          );
+          result.then((value) {
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text(value.stdout)));
+            }
+          });
           result.catchError((error) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text(error.toString())));
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text(error.toString())));
+            }
           });
         },
         tooltip: 'Increment',
