@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:orbitx/dto/packet_dto.dart';
 import 'package:orbitx/services/socket_service.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+
+FlutterTts flutterTts = FlutterTts();
 
 class ActionService {
   static Map<String, Function(List<String>)> availableActions = {
@@ -34,6 +37,11 @@ class ActionService {
       debugPrint("Starting ${parts[0]}\n\n\n");
       InstalledApps.startApp(parts[0]);
       return Future.value(true);
+    },
+    "say": (List<String> parts) async {
+      flutterTts.speak(parts.join(" "));
+      await flutterTts.setSharedInstance(true);
+      return true;
     },
     "snd": (List<String> parts) {
       String safeGet(List<String> list, int index) {
