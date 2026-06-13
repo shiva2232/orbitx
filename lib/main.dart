@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,14 +12,17 @@ import 'dart:io';
 import 'package:orbitx/screens/map_screen.dart';
 import 'package:orbitx/screens/script_screen.dart';
 import 'package:orbitx/screens/terminal_screen.dart';
+import 'package:orbitx/services/action_service.dart';
+import 'package:orbitx/services/socket_service.dart';
+
 void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   WidgetsFlutterBinding.ensureInitialized();
   //   SystemChrome.setEnabledSystemUIMode(
   //   SystemUiMode.edgeToEdge,
   // );
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const MyApp());
 }
@@ -47,6 +52,7 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   List<AppInfo> apps = [];
+  StreamSubscription<Uint8List>? _subs;
 
   PageController pageController = PageController(initialPage: 1);
 
@@ -64,26 +70,15 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               color: Colors.black,
               child: AppsScreen(apps: apps),
             ),
-            Container(
-              color: Colors.black,
-              child: ScriptPage(), 
-            ),
-            Container(
-              color: Colors.black,
-              child: Xterm(),
-            ),
+            Container(color: Colors.black, child: ScriptPage()),
+            Container(color: Colors.black, child: Xterm()),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          var result = Process.run('am', [
-            'start',
-            '-a',
-            'android.intent.action.MAIN',
-            '-c',
-            'android.intent.category.HOME',
-          ]);
+          final result = Process.run('termux-battery-status', []);
+
           result.then(
             (value) => ScaffoldMessenger.of(
               context,
@@ -105,6 +100,42 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    service.listening.listen((on) {
+      debugPrint("executing");
+      if (on) {
+        _subs = service.listen((packet) {
+          debugPrint(packet.toString());
+          if (packet.output != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  packet.output ?? '<Empty Response>',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                duration: const Duration(seconds: 1),
+              ),
+            );
+          }
+          String str = "";
+          if (packet.success != null && packet.success != '') {
+            str = packet.success!.split(" ")[0].trim() == "snd"
+                ? "${packet.success!}::::"
+                : packet.success ?? '';
+          } else if (packet.failure != null && packet.failure != '') {
+            str = packet.failure!.split(" ")[0].trim() == "snd"
+                ? "${packet.failure!}::::"
+                : packet.failure ?? '';
+          }
+          if (str != '') {
+            ActionService.start(str, context);
+          }
+        });
+      } else {
+        if (_subs != null) {
+          _subs!.cancel();
+        }
+      }
+    });
     InstalledApps.getInstalledApps(
       excludeNonLaunchableApps: true,
       excludeSystemApps: false,
@@ -118,6 +149,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    service.destroy();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

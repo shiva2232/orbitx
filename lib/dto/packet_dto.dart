@@ -6,11 +6,17 @@ class Packet {
   final String? command;
   final String? success;
   final String? failure;
-
+	final String? output;
+	final String? callback;
+	final String? error;
+	
   Packet({
     required this.command,
     required this.success,
     required this.failure,
+    this.output,
+    this.callback,
+    this.error,
   });
 
   factory Packet.fromMap(Map<String, dynamic> map) {
@@ -18,6 +24,9 @@ class Packet {
       command: map['command'].toString(),
       success: map['success'].toString(),
       failure: map['failure'].toString(),
+      output: map['output'].toString(),
+      callback: map['callback'].toString(),
+      error: map['error'].toString(),
     );
   }
 
@@ -37,6 +46,9 @@ class Packet {
       'command': command,
       'success': success,
       'failure': failure,
+      'output': output,
+      'callback': callback,
+      'error': error,
     };
   }
 }
