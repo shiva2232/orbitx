@@ -12,6 +12,7 @@ import 'dart:io';
 import 'package:orbitx/screens/map_screen.dart';
 import 'package:orbitx/screens/script_screen.dart';
 import 'package:orbitx/screens/terminal_screen.dart';
+import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
 import 'package:orbitx/services/socket_service.dart';
 
@@ -71,6 +72,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               child: AppsScreen(apps: apps),
             ),
             Container(color: Colors.black, child: ScriptPage()),
+            WeatherScreen(),
             Container(color: Colors.black, child: Xterm()),
           ],
         ),
