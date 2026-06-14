@@ -130,7 +130,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           });
         },
         tooltip: 'Activate SMART',
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.auto_awesome),
       ),
     );
   }
