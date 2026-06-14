@@ -1,13 +1,14 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:installed_apps/app_info.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:orbitx/firebase_options.dart';
 import 'package:orbitx/screens/apps_screen.dart';
-import 'dart:io';
 
 import 'package:orbitx/screens/map_screen.dart';
 import 'package:orbitx/screens/script_screen.dart';
@@ -15,11 +16,39 @@ import 'package:orbitx/screens/terminal_screen.dart';
 import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
 import 'package:orbitx/services/socket_service.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+@pragma('vm:entry-point')
+void onStart(ServiceInstance service) async {
+  DartPluginRegistrant.ensureInitialized();
+
+  Timer.periodic(const Duration(seconds: 10), (timer) async {
+    if (service is AndroidServiceInstance) {
+      service.setForegroundNotificationInfo(
+        title: "Orbit X",
+        content: "SMART MODE is On",
+      );
+      service.on("stopService").listen((event){
+        service.stopSelf();
+      });
+    }
+  });
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  WidgetsFlutterBinding.ensureInitialized();
+  await FlutterBackgroundService().configure(
+    androidConfiguration: AndroidConfiguration(
+      onStart: onStart,
+      autoStart: true,
+      isForegroundMode: true,
+      foregroundServiceNotificationId: 100,
+      initialNotificationTitle: 'OrbitX',
+      initialNotificationContent: 'Running',
+    ),
+    iosConfiguration: IosConfiguration(),
+  );
   //   SystemChrome.setEnabledSystemUIMode(
   //   SystemUiMode.edgeToEdge,
   // );
@@ -78,24 +107,29 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          final result = Process.run('termux-battery-status', []);
-          result.then((value) {
-            if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text(value.stdout)));
-            }
-          });
-          result.catchError((error) {
-            if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text(error.toString())));
+        onPressed: () async {
+          Permission.notification.isGranted.then((value) {
+            if (value) {
+              final service=FlutterBackgroundService();
+              service.isRunning().then((isRunning) {
+                if (!isRunning) {
+                  service.startService();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("SMART turned On")),
+                  );
+                } else {
+                  service.invoke("stopService");
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("SMART turned Off")),
+                  );
+                }
+              });
+            } else {
+              Permission.notification.request();
             }
           });
         },
-        tooltip: 'Increment',
+        tooltip: 'Activate SMART',
         child: const Icon(Icons.add),
       ),
     );
