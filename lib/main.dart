@@ -8,15 +8,22 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:installed_apps/app_info.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:orbitx/firebase_options.dart';
+import 'package:orbitx/helper/automation_engine.dart';
+import 'package:orbitx/helper/database.dart';
+import 'package:orbitx/helper/schedule_helper.dart';
+import 'package:orbitx/helper/variable_context.dart';
+import 'package:orbitx/models/automation_model.dart';
 import 'package:orbitx/screens/apps_screen.dart';
 
 import 'package:orbitx/screens/map_screen.dart';
 import 'package:orbitx/screens/script_screen.dart';
 import 'package:orbitx/screens/terminal_screen.dart';
+import 'package:orbitx/screens/utils_screen.dart';
 import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
 import 'package:orbitx/services/socket_service.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:workmanager/workmanager.dart';
 
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
@@ -28,10 +35,38 @@ void onStart(ServiceInstance service) async {
         title: "Orbit X",
         content: "SMART MODE is On",
       );
-      service.on("stopService").listen((event){
+      service.on("stopService").listen((event) {
         service.stopSelf();
       });
     }
+  });
+}
+
+@pragma('vm:entry-point')
+void callbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    final instance=DatabaseHelper.instance;
+    await instance.initialize();
+    final rules = await instance.loadAll();
+
+    final now = DateTime.now();
+    for (final rule in rules) {
+  if (ScheduleEvaluator.shouldRunNow(
+    rule,
+    now,
+  )) {
+    print(
+      "Run automation: ${rule.name}",
+    );
+
+    await AutomationEngine.run(
+      rule,
+      AutomationContext({}),
+    );
+  }
+}
+
+    return Future.value(true);
   });
 }
 
@@ -48,6 +83,16 @@ void main() async {
       initialNotificationContent: 'Running',
     ),
     iosConfiguration: IosConfiguration(),
+  );
+
+  await Workmanager().initialize(
+    callbackDispatcher,
+    isInDebugMode: true,
+  );
+  Workmanager().registerPeriodicTask(
+    "automation-engine",
+    "automation-engine",
+    frequency: const Duration(minutes: 15),
   );
   //   SystemChrome.setEnabledSystemUIMode(
   //   SystemUiMode.edgeToEdge,
@@ -102,6 +147,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             ),
             Container(color: Colors.black, child: ScriptPage()),
             WeatherScreen(),
+            UtilPage(),
             Container(color: Colors.black, child: Xterm()),
           ],
         ),
@@ -110,18 +156,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         onPressed: () async {
           Permission.notification.isGranted.then((value) {
             if (value) {
-              final service=FlutterBackgroundService();
+              final service = FlutterBackgroundService();
               service.isRunning().then((isRunning) {
                 if (!isRunning) {
                   service.startService();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("SMART turned On")),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text("SMART turned On")));
                 } else {
                   service.invoke("stopService");
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("SMART turned Off")),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text("SMART turned Off")));
                 }
               });
             } else {
@@ -129,6 +175,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             }
           });
         },
+        mini: true,
         tooltip: 'Activate SMART',
         child: const Icon(Icons.auto_awesome),
       ),
