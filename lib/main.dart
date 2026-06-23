@@ -45,26 +45,18 @@ void onStart(ServiceInstance service) async {
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
-    final instance=DatabaseHelper.instance;
+    final instance = DatabaseHelper.instance;
     await instance.initialize();
     final rules = await instance.loadAll();
 
     final now = DateTime.now();
     for (final rule in rules) {
-  if (ScheduleEvaluator.shouldRunNow(
-    rule,
-    now,
-  )) {
-    print(
-      "Run automation: ${rule.name}",
-    );
+      if (ScheduleEvaluator.shouldRunNow(rule, now)) {
+        print("Run automation: ${rule.name}");
 
-    await AutomationEngine.run(
-      rule,
-      AutomationContext({}),
-    );
-  }
-}
+        await AutomationEngine.run(rule, AutomationContext({}));
+      }
+    }
 
     return Future.value(true);
   });
@@ -85,10 +77,7 @@ void main() async {
     iosConfiguration: IosConfiguration(),
   );
 
-  await Workmanager().initialize(
-    callbackDispatcher,
-    isInDebugMode: true,
-  );
+  await Workmanager().initialize(callbackDispatcher, isInDebugMode: true);
   Workmanager().registerPeriodicTask(
     "automation-engine",
     "automation-engine",
@@ -130,9 +119,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   StreamSubscription<Uint8List>? _subs;
 
   PageController pageController = PageController(initialPage: 1);
-
+  double steps = 0;
+  ScrollController scrollController = ScrollController();
   @override
   Widget build(BuildContext context) {
+  final itemKeys = List.generate(apps.length, (_) => GlobalKey());
     return Scaffold(
       extendBody: true,
       body: PopScope(
@@ -144,6 +135,113 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             Container(
               color: Colors.black,
               child: AppsScreen(apps: apps),
+            ),
+            Container(
+              color: Colors.green,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    controller: scrollController,
+                    child: Row(
+                      children: apps.asMap().entries
+                          .map(
+                            (app) => Column(
+                              key: itemKeys[app.key],
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.transparent,
+                                    iconSize: 32,
+                                    padding: EdgeInsets.zero,
+                                    elevation: 5,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  icon: Image.memory(
+                                    app.value.icon!,
+                                    fit: BoxFit.contain,
+                                    width: 32,
+                                    height: 32,
+                                  ),
+                                  label: Text(''),
+                                  onPressed: () {
+                                    InstalledApps.startApp(app.value.packageName);
+                                  },
+                                  onLongPress: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        title: Text(app.value.name),
+                                        content: Text(
+                                          'Package: ${app.value.packageName}',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context),
+                                            child: const Text('Close'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                                Text(
+                                  app.value.name,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.white,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                  SingleChildScrollView(
+                    child: Slider(
+                      value: steps,
+                      label: String.fromCharCode(96 + steps.round()),
+                      onChanged: (step) {
+                        setState(() {
+                          steps = step;
+                        });
+                        if (step == 0) {
+                          scrollController.animateTo(
+                            0,
+                            duration: Duration(milliseconds: 700),
+                            curve: Curves.easeOutCubic,
+                          );
+                        } else {
+                          final int index = apps.indexWhere(
+                            (app) => app.name.toLowerCase().startsWith(
+                              String.fromCharCode(96 + step.round()),
+                            ),
+                          );
+                          debugPrint(index.toString());
+                          if (index != -1) {
+                            scrollController.animateTo(
+                              index * (itemKeys.first.currentContext?.findRenderObject() as RenderBox).size.width,
+                              duration: Duration(milliseconds: 700),
+                              curve: Curves.easeOutCubic,
+                            );
+                          }
+                        }
+                      },
+                      min: 0,
+                      max: 26,
+                      divisions: 27,
+                    ),
+                  ),
+                ],
+              ),
             ),
             Container(color: Colors.black, child: ScriptPage()),
             WeatherScreen(),
@@ -227,6 +325,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       excludeSystemApps: false,
       withIcon: true,
     ).then((apps) {
+      apps.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       setState(() {
         this.apps = apps;
       });
