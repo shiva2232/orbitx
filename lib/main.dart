@@ -12,7 +12,6 @@ import 'package:orbitx/helper/automation_engine.dart';
 import 'package:orbitx/helper/database.dart';
 import 'package:orbitx/helper/schedule_helper.dart';
 import 'package:orbitx/helper/variable_context.dart';
-import 'package:orbitx/models/automation_model.dart';
 import 'package:orbitx/screens/apps_screen.dart';
 
 import 'package:orbitx/screens/map_screen.dart';
@@ -22,6 +21,7 @@ import 'package:orbitx/screens/utils_screen.dart';
 import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
 import 'package:orbitx/services/socket_service.dart';
+import 'package:orbitx/widgets/app_shortcut_tile.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -117,13 +117,24 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   List<AppInfo> apps = [];
   StreamSubscription<Uint8List>? _subs;
+  final List<GlobalKey> _appItemKeys = [];
 
-  PageController pageController = PageController(initialPage: 1);
+  final PageController pageController = PageController(initialPage: 1);
   double steps = 0;
-  ScrollController scrollController = ScrollController();
+  final ScrollController scrollController = ScrollController();
+
+  void _syncAppItemKeys() {
+    while (_appItemKeys.length < apps.length) {
+      _appItemKeys.add(GlobalKey());
+    }
+    while (_appItemKeys.length > apps.length) {
+      _appItemKeys.removeLast();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-  final itemKeys = List.generate(apps.length, (_) => GlobalKey());
+    _syncAppItemKeys();
     return Scaffold(
       extendBody: true,
       body: PopScope(
@@ -141,68 +152,44 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    controller: scrollController,
-                    child: Row(
-                      children: apps.asMap().entries
-                          .map(
-                            (app) => Column(
-                              key: itemKeys[app.key],
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.transparent,
-                                    iconSize: 32,
-                                    padding: EdgeInsets.zero,
-                                    elevation: 5,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
+                  SizedBox(
+                    height: 96,
+                    child: ListView.builder(
+                      controller: scrollController,
+                      padding: EdgeInsets.zero,
+                      scrollDirection: Axis.horizontal,
+                      itemCount: apps.length,
+                      itemBuilder: (context, index) {
+                        final app = apps[index];
+
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: AppShortcutTile(
+                            key: _appItemKeys[index],
+                            app: app,
+                            onPressed: () {
+                              InstalledApps.startApp(app.packageName);
+                            },
+                            onLongPress: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: Text(app.name),
+                                  content: Text(
+                                    'Package: ${app.packageName}',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text('Close'),
                                     ),
-                                  ),
-                                  icon: Image.memory(
-                                    app.value.icon!,
-                                    fit: BoxFit.contain,
-                                    width: 32,
-                                    height: 32,
-                                  ),
-                                  label: Text(''),
-                                  onPressed: () {
-                                    InstalledApps.startApp(app.value.packageName);
-                                  },
-                                  onLongPress: () {
-                                    showDialog(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        title: Text(app.value.name),
-                                        content: Text(
-                                          'Package: ${app.value.packageName}',
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(context),
-                                            child: const Text('Close'),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
+                                  ],
                                 ),
-                                Text(
-                                  app.value.name,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.white,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
-                            ),
-                          )
-                          .toList(),
+                              );
+                            },
+                          ),
+                        );
+                      },
                     ),
                   ),
                   SingleChildScrollView(
@@ -228,8 +215,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           debugPrint(index.toString());
                           if (index != -1) {
                             scrollController.animateTo(
-                              index * (itemKeys.first.currentContext?.findRenderObject() as RenderBox).size.width,
-                              duration: Duration(milliseconds: 700),
+                              index * (_appItemKeys.first.currentContext?.findRenderObject() as RenderBox).size.width,
+                              duration: const Duration(milliseconds: 700),
                               curve: Curves.easeOutCubic,
                             );
                           }
@@ -336,6 +323,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   void dispose() {
     service.destroy();
     WidgetsBinding.instance.removeObserver(this);
+    pageController.dispose();
+    scrollController.dispose();
     super.dispose();
   }
 
