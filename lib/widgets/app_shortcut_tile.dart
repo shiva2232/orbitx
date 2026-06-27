@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:installed_apps/app_info.dart';
 
-class AppShortcutTile extends StatelessWidget {
+class AppShortcutTile extends StatefulWidget {
   const AppShortcutTile({
     super.key,
     required this.app,
@@ -12,10 +12,17 @@ class AppShortcutTile extends StatelessWidget {
   final AppInfo app;
   final VoidCallback onPressed;
   final VoidCallback onLongPress;
+  @override
+  State<AppShortcutTile> createState() => _AppShortcutTileState();
+}
 
+class _AppShortcutTileState extends State<AppShortcutTile> {
+  
+  final GlobalKey _appItemKeys=GlobalKey();
   @override
   Widget build(BuildContext context) {
     return Column(
+      key: _appItemKeys,
       mainAxisSize: MainAxisSize.min,
       children: [
         ElevatedButton.icon(
@@ -29,17 +36,17 @@ class AppShortcutTile extends StatelessWidget {
             ),
           ),
           icon: Image.memory(
-            app.icon!,
+            widget.app.icon!,
             fit: BoxFit.contain,
             width: 32,
             height: 32,
           ),
           label: const Text(''),
-          onPressed: onPressed,
-          onLongPress: onLongPress,
+          onPressed: widget.onPressed,
+          onLongPress: widget.onLongPress,
         ),
         Text(
-          app.name,
+          widget.app.name,
           style: const TextStyle(
             fontSize: 10,
             color: Colors.white,

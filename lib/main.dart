@@ -21,7 +21,6 @@ import 'package:orbitx/screens/utils_screen.dart';
 import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
 import 'package:orbitx/services/socket_service.dart';
-import 'package:orbitx/widgets/app_shortcut_tile.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -117,24 +116,14 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   List<AppInfo> apps = [];
   StreamSubscription<Uint8List>? _subs;
-  final List<GlobalKey> _appItemKeys = [];
-
+  double width = 0.0;
   final PageController pageController = PageController(initialPage: 1);
   double steps = 0;
   final ScrollController scrollController = ScrollController();
-
-  void _syncAppItemKeys() {
-    while (_appItemKeys.length < apps.length) {
-      _appItemKeys.add(GlobalKey());
-    }
-    while (_appItemKeys.length > apps.length) {
-      _appItemKeys.removeLast();
-    }
-  }
+  List<AppInfo> filtered=[];
 
   @override
   Widget build(BuildContext context) {
-    _syncAppItemKeys();
     return Scaffold(
       extendBody: true,
       body: PopScope(
@@ -152,80 +141,97 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  SizedBox(
-                    height: 96,
+                  Container(
+                    color: Color.from(alpha: 0.5, red: 0.0, green: 0.5, blue: 0.5),
+                    child: Padding(
+                        padding: EdgeInsetsGeometry.all(5),
+                        child: TextField(
+                          onChanged: (value) {
+                            setState(() {
+                              filtered=apps.where((app)=>app.name.toLowerCase().contains(value.toLowerCase())).toList();
+                            });
+                          },
+                        ),
+                      )
+                  ),
+                  Expanded(
                     child: ListView.builder(
                       controller: scrollController,
                       padding: EdgeInsets.zero,
-                      scrollDirection: Axis.horizontal,
-                      itemCount: apps.length,
+                      scrollDirection: Axis.vertical,
+                      itemCount: filtered.length,
                       itemBuilder: (context, index) {
-                        final app = apps[index];
-
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: AppShortcutTile(
-                            key: _appItemKeys[index],
-                            app: app,
-                            onPressed: () {
-                              InstalledApps.startApp(app.packageName);
-                            },
-                            onLongPress: () {
-                              showDialog(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: Text(app.name),
-                                  content: Text(
-                                    'Package: ${app.packageName}',
+                        final app = filtered[index];
+                        return Material(
+                          color: Color.from(alpha: 0.5, red: 0.1, green: 0.1, blue: 0.1),
+                          child: ListTile(
+                            onTap: () {
+                                InstalledApps.startApp(app.packageName);
+                              },
+                              onLongPress:  () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: Text(app.name),
+                                    content: Text('Package: ${app.packageName}'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('Close'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () {
+                                          InstalledApps.uninstallApp(app.packageName);
+                                          Navigator.pop(context);
+                                        },
+                                        child: const Text('Uninstall'),
+                                      ),
+                                    ],
                                   ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(context),
-                                      child: const Text('Close'),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
+                                );
+                              },
+                            leading: Image.memory(
+                              app.icon!,
+                              fit: BoxFit.contain,
+                              width: 32,
+                              height: 32,
+                            ),
+                            subtitle: Text(app.packageName),
+                            title: Text(app.name),
+                            trailing: Text(app.versionName),
+                            tileColor: Color.fromARGB(122, 167, 167, 167),
+                            hoverColor: Color.fromARGB(134, 35, 53, 88),
+                            titleAlignment: ListTileTitleAlignment.center,
+                            style: ListTileStyle.list,
                           ),
                         );
                       },
                     ),
                   ),
-                  SingleChildScrollView(
-                    child: Slider(
-                      value: steps,
-                      label: String.fromCharCode(96 + steps.round()),
-                      onChanged: (step) {
-                        setState(() {
-                          steps = step;
-                        });
-                        if (step == 0) {
-                          scrollController.animateTo(
-                            0,
-                            duration: Duration(milliseconds: 700),
-                            curve: Curves.easeOutCubic,
-                          );
-                        } else {
-                          final int index = apps.indexWhere(
-                            (app) => app.name.toLowerCase().startsWith(
-                              String.fromCharCode(96 + step.round()),
-                            ),
-                          );
-                          debugPrint(index.toString());
-                          if (index != -1) {
-                            scrollController.animateTo(
-                              index * (_appItemKeys.first.currentContext?.findRenderObject() as RenderBox).size.width,
-                              duration: const Duration(milliseconds: 700),
-                              curve: Curves.easeOutCubic,
-                            );
-                          }
-                        }
-                      },
-                      min: 0,
-                      max: 26,
-                      divisions: 27,
-                    ),
+                  Slider(
+                    value: steps,
+                    label: String.fromCharCode(97 + steps.round()),
+                    onChanged: (step) {
+                      setState(() {
+                        steps = step;
+                      });
+                      final int index = apps.indexWhere(
+                        (app) => app.name.toLowerCase().startsWith(
+                          String.fromCharCode(97 + step.round()),
+                        ),
+                      );
+                      debugPrint("$index $index $step ${index * width} $width");
+                      if (index != -1) {
+                        scrollController.animateTo(
+                          index * width,
+                          duration: const Duration(milliseconds: 700),
+                          curve: Curves.easeOutCubic,
+                        );
+                      }
+                    },
+                    min: 0,
+                    max: 27,
+                    divisions: 27,
                   ),
                 ],
               ),
@@ -315,6 +321,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       apps.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       setState(() {
         this.apps = apps;
+        filtered = apps;
       });
     });
   }
