@@ -222,7 +222,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           onDismissed: (direction) {
                             if (direction == DismissDirection.startToEnd) {
                               // Handle swipe right action (e.g., archive)
-                              addOrRemoveVpn(app.packageName);
+                              addOrRemoveVpn(app.packageName).then((val){
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(val['result']==true ? '${val['isAdd']==true? 'Added':'Removed'} to VPN' : 'Failed')));
+                              });
                             } else if (direction ==
                                 DismissDirection.endToStart) {
                               // Handle swipe left action (e.g., delete)
