@@ -33,6 +33,14 @@ class MainActivity : FlutterActivity() {
 
     private val connectionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            val peerIp = intent?.getStringExtra("peerIp")
+            val peerPort = intent?.getIntExtra("peerPort", 0) ?: 0
+            flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                MethodChannel(messenger, CHANNEL).invokeMethod(
+                    "connectionEstablished",
+                    mapOf("peerIp" to peerIp, "peerPort" to peerPort),
+                )
+            }
             showTunnelConnectedToast()
         }
     }

@@ -9,11 +9,22 @@ class VpnController {
   final StreamController<Map<String, dynamic>> _statusController = StreamController.broadcast();
   final Set<String> _allowed = {};
 
+  Completer<bool>? _tunReadyCompleter;
+
   VpnController() {
-    // listen for tunReady calls from Android
+    // listen for tunReady and connection events from Android
     _platform.setMethodCallHandler((call) async {
       if (call.method == 'tunReady') {
         _statusController.add({'event': 'tunReady'});
+        _tunReadyCompleter?.complete(true);
+        _tunReadyCompleter = null;
+      } else if (call.method == 'connectionEstablished') {
+        final args = call.arguments as Map<String, dynamic>?;
+        _statusController.add({
+          'event': 'connected',
+          'peerIp': args?['peerIp'],
+          'peerPort': args?['peerPort'],
+        });
       }
     });
     _loadAllowedApps();
@@ -40,12 +51,22 @@ class VpnController {
   }
 
   Future<bool> requestPermissionAndStart(String pairingHash, String role, String preshared) async {
+    _tunReadyCompleter = Completer<bool>();
     final ok = await _platform.invokeMethod('requestPermission', {
       'pairingHash': pairingHash,
       'role': role,
       'presharedSecret': preshared,
     });
-    return ok == true;
+    if (ok != true) {
+      _tunReadyCompleter = null;
+      return false;
+    }
+    try {
+      return await _tunReadyCompleter!.future.timeout(const Duration(seconds: 10));
+    } catch (_) {
+      _tunReadyCompleter = null;
+      return false;
+    }
   }
 
   Future<bool> addAllowedApp(String packageName) async {
@@ -79,6 +100,8 @@ class VpnController {
   Future<void> stopService() async {
     await _platform.invokeMethod('stopService');
     stopEngine();
+    _tunReadyCompleter?.complete(false);
+    _tunReadyCompleter = null;
   }
 
   // FFI wrappers

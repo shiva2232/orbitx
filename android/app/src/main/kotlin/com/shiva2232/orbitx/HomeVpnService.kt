@@ -3,19 +3,23 @@ package com.shiva2232.orbitx
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.ParcelFileDescriptor
+import org.json.JSONObject
 
 private const val CONNECTION_ESTABLISHED_ACTION = "com.shiva2232.orbitx.CONNECTION_ESTABLISHED"
 
 class HomeVpnService : VpnService() {
     private var pfd: ParcelFileDescriptor? = null
     private val allowedApps = mutableSetOf<String>()
+    private var statusHandler: Handler? = null
+    private var currentConnected = false
 
     override fun onBind(intent: Intent?): IBinder? {
         return super.onBind(intent)
@@ -55,12 +59,11 @@ class HomeVpnService : VpnService() {
                 VpnBridge.submitTunFd(it.fd)
                 if (!pairingHash.isNullOrBlank() && !role.isNullOrBlank()) {
                     VpnBridge.startEngine(pairingHash, role, preshared ?: "")
+                    startStatusPolling()
                 }
                 // notify Flutter/UI that TUN is ready
                 val tunReadyIntent = Intent("com.shiva2232.orbitx.TUN_READY")
                 sendBroadcast(tunReadyIntent)
-                // notify local app that tunnel is connected
-                sendConnectionBroadcast()
             } catch (e: Throwable) {
                 e.printStackTrace()
             }
@@ -111,16 +114,59 @@ class HomeVpnService : VpnService() {
                 VpnBridge.submitTunFd(it.fd)
                 val intent = Intent("com.shiva2232.orbitx.TUN_READY")
                 sendBroadcast(intent)
-                sendConnectionBroadcast()
             } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
     }
 
-    private fun sendConnectionBroadcast() {
+    private fun sendConnectionBroadcast(peerIp: String? = null, peerPort: Int = 0) {
         val connectedIntent = Intent(CONNECTION_ESTABLISHED_ACTION)
+        if (!peerIp.isNullOrBlank()) {
+            connectedIntent.putExtra("peerIp", peerIp)
+        }
+        if (peerPort > 0) {
+            connectedIntent.putExtra("peerPort", peerPort)
+        }
         sendBroadcast(connectedIntent)
+    }
+
+    private val statusCheckRunnable = object : Runnable {
+        override fun run() {
+            try {
+                val statusJson = VpnBridge.getStatusJSON()
+                if (!statusJson.isNullOrBlank()) {
+                    val json = JSONObject(statusJson)
+                    val state = json.optString("state", "")
+                    val peerIp = json.optString("peerIp", null)
+                    val peerPort = json.optInt("peerPort", 0)
+                    if (state == "CONNECTED" && !currentConnected) {
+                        currentConnected = true
+                        sendConnectionBroadcast(peerIp, peerPort)
+                    } else if (state != "CONNECTED") {
+                        currentConnected = false
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                statusHandler?.postDelayed(this, 1000)
+            }
+        }
+    }
+
+    private fun startStatusPolling() {
+        if (statusHandler == null) {
+            statusHandler = Handler(Looper.getMainLooper())
+        }
+        statusHandler?.removeCallbacks(statusCheckRunnable)
+        statusHandler?.post(statusCheckRunnable)
+    }
+
+    private fun stopStatusPolling() {
+        statusHandler?.removeCallbacks(statusCheckRunnable)
+        statusHandler = null
+        currentConnected = false
     }
 
     fun configureSplitTunnel(builder: Builder, subnetCidr: String) {
@@ -144,6 +190,7 @@ class HomeVpnService : VpnService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopStatusPolling()
         pfd?.close()
     }
 
