@@ -102,6 +102,10 @@ class _WeatherScreenState extends State<WeatherScreen> {
                 GeoPoint(latitude: pos.latitude, longitude: pos.longitude),
               ).then(
                 (val) => {
+                  // sharedPreferences.setString(
+                  //   "last_location",
+                  //   "${pos.latitude},${pos.longitude}",
+                  // ),
                   setState(() {
                     json = val;
                   }),
