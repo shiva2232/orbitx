@@ -18,8 +18,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -42,6 +44,9 @@ var (
 	firebaseDB        = "https://orbitx-os-default-rtdb.asia-southeast1.firebasedatabase.app"
 	lastPublishedIP   string
 	lastPublishedPort int
+	stunConn          *net.UDPConn
+	stunServer        = "stun.l.google.com:19302"
+	stunOnce          sync.Once
 	// internal channels for simulated WebRTC/data-channel placeholders
 	peerUpdateCh = make(chan struct{}, 1)
 )
@@ -109,8 +114,8 @@ func StartEngine(cpair *C.char, crole *C.char, csecret *C.char) C.int {
 	// kick off engine subroutines: heartbeat, peer listener, and engine loop
 	go engineLoop(ctx)
 
-	// start a heartbeat that republishes our endpoint to Firebase (using a placeholder ip/port)
-	go heartbeatLoop(ctx, pair, role, "0.0.0.0", 0)
+	// start a heartbeat that republishes our endpoint to Firebase (discover via STUN)
+	go heartbeatLoop(ctx, pair, role)
 
 	// start listening for peer updates
 	go func() {
@@ -215,6 +220,90 @@ func writeEndpointToFirebase(hash, role, ip string, port int) error {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 	return nil
+}
+
+// initializeStunConn creates one reusable UDP socket to a STUN server.
+func initializeStunConn() error {
+	var err error
+	stunOnce.Do(func() {
+		addr, e := net.ResolveUDPAddr("udp", stunServer)
+		if e != nil {
+			err = e
+			return
+		}
+		stunConn, err = net.DialUDP("udp", nil, addr)
+	})
+	if err != nil {
+		return err
+	}
+	if stunConn == nil {
+		return errors.New("failed to initialize STUN connection")
+	}
+	return nil
+}
+
+// stunBinding sends a STUN Binding Request over the existing stunConn and returns the mapped public IP/port.
+func stunBinding(timeout time.Duration) (string, int, error) {
+	if err := initializeStunConn(); err != nil {
+		return "", 0, err
+	}
+	_ = stunConn.SetDeadline(time.Now().Add(timeout))
+
+	// build STUN Binding Request (no attributes)
+	req := make([]byte, 20)
+	binary.BigEndian.PutUint16(req[0:2], 0x0001)
+	binary.BigEndian.PutUint16(req[2:4], 0)
+	binary.BigEndian.PutUint32(req[4:8], 0x2112A442)
+	txid := make([]byte, 12)
+	if _, err := rand.Read(txid); err != nil {
+		return "", 0, err
+	}
+	copy(req[8:20], txid)
+
+	if _, err := stunConn.Write(req); err != nil {
+		return "", 0, err
+	}
+
+	resp := make([]byte, 1500)
+	n, err := stunConn.Read(resp)
+	if err != nil {
+		return "", 0, err
+	}
+	if n < 20 {
+		return "", 0, errors.New("short stun response")
+	}
+	if binary.BigEndian.Uint32(resp[4:8]) != 0x2112A442 {
+		return "", 0, errors.New("invalid stun cookie")
+	}
+	pos := 20
+	for pos+4 <= n {
+		atype := binary.BigEndian.Uint16(resp[pos : pos+2])
+		alen := int(binary.BigEndian.Uint16(resp[pos+2 : pos+4]))
+		pos += 4
+		if pos+alen > n {
+			break
+		}
+		if atype == 0x0020 && alen >= 8 {
+			family := resp[pos+1]
+			if family != 0x01 {
+				return "", 0, errors.New("unsupported family")
+			}
+			xport := binary.BigEndian.Uint16(resp[pos+2 : pos+4])
+			port := int(xport ^ (0x2112))
+			xaddr := binary.BigEndian.Uint32(resp[pos+4 : pos+8])
+			ipInt := xaddr ^ 0x2112A442
+			ip := net.IPv4(byte(ipInt>>24), byte(ipInt>>16), byte(ipInt>>8), byte(ipInt)).String()
+			return ip, port, nil
+		}
+		pad := (alen + 3) &^ 3
+		pos += pad
+	}
+	return "", 0, errors.New("no xor-mapped address in stun response")
+}
+
+// getPublicIPPortFromStun uses the persistent STUN UDP socket for discovery.
+func getPublicIPPortFromStun() (string, int, error) {
+	return stunBinding(5 * time.Second)
 }
 
 // getPublicIP queries a public service to determine this device's public IP.
@@ -458,7 +547,24 @@ func bridgeWebRTC(peerIP string, peerPort int, peerPrivateIP string) error {
 }
 
 // heartbeatLoop periodically republishes our endpoint to Firebase to keep NAT bindings alive.
-func heartbeatLoop(ctx context.Context, hash, role, ip string, port int) {
+func heartbeatLoop(ctx context.Context, hash, role string) {
+	if err := initializeStunConn(); err != nil {
+		// direct fallback to public IP if STUN fails to initialize
+		ip, err2 := getPublicIP()
+		if err2 == nil {
+			_ = writeEndpointToFirebase(hash, role, ip, 0)
+		}
+		return
+	}
+
+	// publish initial mapping once on startup
+	ip, port, err := getPublicIPPortFromStun()
+	if err != nil {
+		ip, _ = getPublicIP()
+		port = 0
+	}
+	_ = writeEndpointToFirebase(hash, role, ip, port)
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -466,6 +572,11 @@ func heartbeatLoop(ctx context.Context, hash, role, ip string, port int) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			ip, port, err := getPublicIPPortFromStun()
+			if err != nil {
+				ip, _ = getPublicIP()
+				port = 0
+			}
 			_ = writeEndpointToFirebase(hash, role, ip, port)
 		}
 	}
