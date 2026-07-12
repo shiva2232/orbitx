@@ -11,6 +11,10 @@ static const char* GetStringUTFCharsC(JNIEnv *env, jstring str) {
 static void ReleaseStringUTFCharsC(JNIEnv *env, jstring str, const char* chars) {
 	(*env)->ReleaseStringUTFChars(env, str, chars);
 }
+
+static jstring NewStringUTF_C(JNIEnv *env, const char* bytes) {
+	return (*env)->NewStringUTF(env, bytes);
+}
 */
 import "C"
 
@@ -646,6 +650,17 @@ func NotifyNetworkChanged() C.int {
 //export Java_com_shiva2232_orbitx_VpnBridge_notifyNetworkChanged
 func Java_com_shiva2232_orbitx_VpnBridge_notifyNetworkChanged(env *C.JNIEnv, clazz C.jclass) C.jint {
 	return NotifyNetworkChanged()
+}
+
+//export Java_com_shiva2232_orbitx_VpnBridge_getStatusJSON
+func Java_com_shiva2232_orbitx_VpnBridge_getStatusJSON(env *C.JNIEnv, clazz C.jclass) C.jstring {
+	cstr := GetStatusJSON()
+	if cstr == nil {
+		var zero C.jstring
+		return zero
+	}
+	defer C.free(unsafe.Pointer(cstr))
+	return C.NewStringUTF_C(env, cstr)
 }
 
 //export GetStatusJSON

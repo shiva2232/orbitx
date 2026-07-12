@@ -120,6 +120,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   VpnController controller = VpnController();
   List<AppInfo> apps = [];
   StreamSubscription<Uint8List>? _subs;
+  StreamSubscription<Map<String, dynamic>>? _vpnStatusSub;
+  String? tunnelPeerIp;
+  int? tunnelPeerPort;
+  bool tunnelConnected = false;
+  bool vpnEnabled = false;
   double width = 0.0;
   final PageController pageController = PageController(initialPage: 0);
   double steps = 0;
@@ -132,20 +137,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    void genHash() {
-      Uuid uuid = Uuid();
-      String pairingHash = uuid.v4();
-      Clipboard.setData(ClipboardData(text: pairingHash));
-      controller.requestPermissionAndStart(
-        pairingHash,
-        currentRole,
-        "presharedSecret",
-      );
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Uid Copied to clipboard!!!")));
-    }
-
     return Scaffold(
       extendBody: true,
       body: PopScope(
@@ -380,55 +371,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           ),
                           child: ListTile(
                             textColor: Colors.blue,
-                            title: Text('TUNNEL'),
-                            onTap: () {
-                              debugPrint("TUNNEL");
-                              Clipboard.getData(Clipboard.kTextPlain).then((
-                                value,
-                              ) {
-                                debugPrint("Clipboard: ${value?.text}");
-                                if (value != null && value.text != null) {
-                                  final pairingHash = value.text!;
-                                  if (UuidValidation.isValidUUID(
-                                    fromString: pairingHash,
-                                  )) {
-                                    controller.requestPermissionAndStart(
-                                      pairingHash,
-                                      currentRole,
-                                      "presharedSecret",
-                                    );
-                                  } else {
-                                    genHash();
-                                  }
-                                } else {
-                                  genHash();
-                                }
-                              });
-                            },
-                            onLongPress: () {
-                              debugPrint("TUNNEL");
-                              Clipboard.getData(Clipboard.kTextPlain).then((
-                                value,
-                              ) {
-                                debugPrint("Clipboard: ${value?.text}");
-                                if (value != null && value.text != null) {
-                                  final pairingHash = value.text!;
-                                  if (UuidValidation.isValidUUID(
-                                    fromString: pairingHash,
-                                  )) {
-                                    controller.requestPermissionAndStart(
-                                      pairingHash,
-                                      currentRole,
-                                      "presharedSecret",
-                                    );
-                                  } else {
-                                    genHash();
-                                  }
-                                } else {
-                                  genHash();
-                                }
-                              });
-                            },
+                            title: const Text('TUNNEL'),
+                            subtitle: Text(
+                              tunnelConnected
+                                  ? 'Connected: ${tunnelPeerIp ?? 'unknown'}:${tunnelPeerPort ?? 0}'
+                                  : (vpnEnabled ? 'Waiting for tunnel...' : 'Tap switch to enable VPN'),
+                            ),
+                            trailing: Switch(
+                              value: vpnEnabled,
+                              onChanged: (value) {
+                                _setVpnEnabled(value);
+                              },
+                            ),
                           ),
                         ),
                       ),
@@ -583,6 +537,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         }
       }
     });
+    _vpnStatusSub = controller.events.listen((event) {
+      if (event['event'] == 'connected') {
+        setState(() {
+          tunnelConnected = true;
+          tunnelPeerIp = event['peerIp'] as String?;
+          tunnelPeerPort = event['peerPort'] as int?;
+        });
+      }
+    });
+
     InstalledApps.getInstalledApps(
       excludeNonLaunchableApps: true,
       excludeSystemApps: false,
@@ -599,6 +563,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     service.destroy();
+    _vpnStatusSub?.cancel();
+    _subs?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     pageController.dispose();
     scrollController.dispose();
@@ -610,6 +576,49 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     }
+  }
+
+  Future<String> _ensurePairingHash() async {
+    final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
+    final String? value = clipboard?.text;
+    if (value != null && UuidValidation.isValidUUID(fromString: value)) {
+      return value;
+    }
+    final pairingHash = const Uuid().v4();
+    await Clipboard.setData(ClipboardData(text: pairingHash));
+    return pairingHash;
+  }
+
+  Future<void> _setVpnEnabled(bool enabled) async {
+    if (!enabled) {
+      await controller.stopService();
+      setState(() {
+        vpnEnabled = false;
+        tunnelConnected = false;
+        tunnelPeerIp = null;
+        tunnelPeerPort = null;
+      });
+      return;
+    }
+
+    final pairingHash = await _ensurePairingHash();
+    final ok = await controller.requestPermissionAndStart(
+      pairingHash,
+      currentRole,
+      'presharedSecret',
+    );
+    if (!ok) {
+      setState(() {
+        vpnEnabled = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('VPN permission denied or failed to start')),
+      );
+      return;
+    }
+    setState(() {
+      vpnEnabled = true;
+    });
   }
 
   Future<Map<String, bool>> addOrRemoveVpn(String packageName) async {
