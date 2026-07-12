@@ -21,6 +21,7 @@ import 'package:orbitx/screens/utils_screen.dart';
 import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
 import 'package:orbitx/services/socket_service.dart';
+import 'package:orbitx/vpn_controller.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -114,13 +115,14 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
+  VpnController controller = VpnController();
   List<AppInfo> apps = [];
   StreamSubscription<Uint8List>? _subs;
   double width = 0.0;
   final PageController pageController = PageController(initialPage: 1);
   double steps = 0;
   final ScrollController scrollController = ScrollController();
-  List<AppInfo> filtered=[];
+  List<AppInfo> filtered = [];
 
   @override
   Widget build(BuildContext context) {
@@ -142,17 +144,28 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Container(
-                    color: Color.from(alpha: 0.5, red: 0.0, green: 0.5, blue: 0.5),
+                    color: Color.from(
+                      alpha: 0.5,
+                      red: 0.0,
+                      green: 0.5,
+                      blue: 0.5,
+                    ),
                     child: Padding(
-                        padding: EdgeInsetsGeometry.all(5),
-                        child: TextField(
-                          onChanged: (value) {
-                            setState(() {
-                              filtered=apps.where((app)=>app.name.toLowerCase().contains(value.toLowerCase())).toList();
-                            });
-                          },
-                        ),
-                      )
+                      padding: EdgeInsetsGeometry.all(5),
+                      child: TextField(
+                        onChanged: (value) {
+                          setState(() {
+                            filtered = apps
+                                .where(
+                                  (app) => app.name.toLowerCase().contains(
+                                    value.toLowerCase(),
+                                  ),
+                                )
+                                .toList();
+                          });
+                        },
+                      ),
+                    ),
                   ),
                   Expanded(
                     child: ListView.builder(
@@ -162,18 +175,81 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                       itemCount: filtered.length,
                       itemBuilder: (context, index) {
                         final app = filtered[index];
-                        return Material(
-                          color: Color.from(alpha: 0.5, red: 0.1, green: 0.1, blue: 0.1),
-                          child: ListTile(
-                            onTap: () {
+                        return Dismissible(
+                          // 2. Assign a unique key matching the data object (Crucial for ListView performance)
+                          key: Key(app.packageName),
+
+                          // 3. Set the swipe direction
+                          direction: DismissDirection.horizontal,
+
+                          // Visual background when swiping right (e.g., Save/Archive)
+                          background: Container(
+                            color: Colors.green,
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20.0,
+                            ),
+                            child: const Icon(
+                              Icons.archive,
+                              color: Colors.white,
+                            ),
+                          ),
+
+                          // Visual background when swiping left (e.g., Delete)
+                          secondaryBackground: Container(
+                            color: Colors.red,
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20.0,
+                            ),
+                            child: const Icon(
+                              Icons.delete,
+                              color: Colors.white,
+                            ),
+                          ),
+
+                          // 4. Handle confirmation logic (Optional: e.g., show an alert before deleting)
+                          confirmDismiss: (direction) async {
+                            if (direction == DismissDirection.endToStart) {
+                              // Return true to allow dismissal, false to cancel
+                              return false;
+                            }
+                            // Allow swipe right unconditionally
+                            return true;
+                          },
+
+                          // 5. Handle state changes when a swipe finishes
+                          onDismissed: (direction) {
+                            if (direction == DismissDirection.startToEnd) {
+                              // Handle swipe right action (e.g., archive)
+                              addOrRemoveVpn(app.packageName);
+                            } else if (direction ==
+                                DismissDirection.endToStart) {
+                              // Handle swipe left action (e.g., delete)
+                              // InstalledApps.uninstallApp(app.packageName);
+                            }
+                          },
+
+                          // The actual item content
+                          child: Material(
+                            color: Color.from(
+                              alpha: 0.5,
+                              red: 0.1,
+                              green: 0.1,
+                              blue: 0.1,
+                            ),
+                            child: ListTile(
+                              onTap: () {
                                 InstalledApps.startApp(app.packageName);
                               },
-                              onLongPress:  () {
+                              onLongPress: () {
                                 showDialog(
                                   context: context,
                                   builder: (context) => AlertDialog(
                                     title: Text(app.name),
-                                    content: Text('Package: ${app.packageName}'),
+                                    content: Text(
+                                      'Package: ${app.packageName}',
+                                    ),
                                     actions: [
                                       TextButton(
                                         onPressed: () => Navigator.pop(context),
@@ -181,7 +257,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                       ),
                                       TextButton(
                                         onPressed: () {
-                                          InstalledApps.uninstallApp(app.packageName);
+                                          InstalledApps.uninstallApp(
+                                            app.packageName,
+                                          );
                                           Navigator.pop(context);
                                         },
                                         child: const Text('Uninstall'),
@@ -190,19 +268,20 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                   ),
                                 );
                               },
-                            leading: Image.memory(
-                              app.icon!,
-                              fit: BoxFit.contain,
-                              width: 32,
-                              height: 32,
+                              leading: Image.memory(
+                                app.icon!,
+                                fit: BoxFit.contain,
+                                width: 32,
+                                height: 32,
+                              ),
+                              subtitle: Text(app.packageName),
+                              title: Text(app.name),
+                              trailing: Text(app.versionName),
+                              tileColor: Color.fromARGB(122, 167, 167, 167),
+                              hoverColor: Color.fromARGB(134, 35, 53, 88),
+                              titleAlignment: ListTileTitleAlignment.center,
+                              style: ListTileStyle.list,
                             ),
-                            subtitle: Text(app.packageName),
-                            title: Text(app.name),
-                            trailing: Text(app.versionName),
-                            tileColor: Color.fromARGB(122, 167, 167, 167),
-                            hoverColor: Color.fromARGB(134, 35, 53, 88),
-                            titleAlignment: ListTileTitleAlignment.center,
-                            style: ListTileStyle.list,
                           ),
                         );
                       },
@@ -340,5 +419,19 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     }
+  }
+
+  Future<Map<String, bool>> addOrRemoveVpn(String packageName) async {
+    // load current state from controller
+    final bool already = controller.isAllowed(packageName);
+    bool ok = false;
+    if (!already) {
+      // add to VPN allowed apps
+      ok = await controller.addAllowedApp(packageName);
+    } else {
+      // remove from VPN allowed apps
+      ok = await controller.removeAllowedApp(packageName);
+    }
+    return {"result": ok, "isAdd": !already};
   }
 }
