@@ -3,6 +3,14 @@ package main
 /*
 #include <stdlib.h>
 #include <jni.h>
+
+static const char* GetStringUTFCharsC(JNIEnv *env, jstring str) {
+	return (*env)->GetStringUTFChars(env, str, NULL);
+}
+
+static void ReleaseStringUTFCharsC(JNIEnv *env, jstring str, const char* chars) {
+	(*env)->ReleaseStringUTFChars(env, str, chars);
+}
 */
 import "C"
 
@@ -59,15 +67,15 @@ func Java_com_shiva2232_orbitx_VpnBridge_submitTunFd(env *C.JNIEnv, clazz C.jcla
 
 //export Java_com_shiva2232_orbitx_VpnBridge_startEngine
 func Java_com_shiva2232_orbitx_VpnBridge_startEngine(env *C.JNIEnv, clazz C.jclass, cpair C.jstring, crole C.jstring, csecret C.jstring) C.jint {
-	pairPtr := C.GetStringUTFChars(env, cpair, nil)
-	rolePtr := C.GetStringUTFChars(env, crole, nil)
-	secretPtr := C.GetStringUTFChars(env, csecret, nil)
+	pairPtr := C.GetStringUTFCharsC(env, cpair)
+	rolePtr := C.GetStringUTFCharsC(env, crole)
+	secretPtr := C.GetStringUTFCharsC(env, csecret)
 	pair := C.GoString(pairPtr)
 	role := C.GoString(rolePtr)
 	secret := C.GoString(secretPtr)
-	C.ReleaseStringUTFChars(env, cpair, pairPtr)
-	C.ReleaseStringUTFChars(env, crole, rolePtr)
-	C.ReleaseStringUTFChars(env, csecret, secretPtr)
+	C.ReleaseStringUTFCharsC(env, cpair, pairPtr)
+	C.ReleaseStringUTFCharsC(env, crole, rolePtr)
+	C.ReleaseStringUTFCharsC(env, csecret, secretPtr)
 
 	cp := C.CString(pair)
 	cr := C.CString(role)

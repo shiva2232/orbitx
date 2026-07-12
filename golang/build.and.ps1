@@ -8,10 +8,13 @@ function Build-Arch($arch, $target, $folder) {
     $env:GOOS = "android"
     $env:GOARCH = $arch
     $env:CGO_ENABLED = "1"
+    # Force module mode to use the local go.mod
+    $env:GO111MODULE = "on"
     $env:CC = "$BASE_TOOLCHAIN\$target$API-clang.cmd"
 
-    # go build -v -buildmode=c-shared -o libvpnengine.so .
-    go build -buildmode=c-shared -o libvpnengine.so vpnengine.go
+    # Build only the JNI-enabled vpnengine source (vpnengine.go contains the cgo preamble)
+    # Use verbose output to help diagnose cross-compile issues.
+    go build -v -buildmode=c-shared -o libvpnengine.so vpnengine.go
     
     $dest = "../android/app/src/main/jniLibs/$folder"
     if (!(Test-Path $dest)) { New-Item -ItemType Directory -Force $dest }
