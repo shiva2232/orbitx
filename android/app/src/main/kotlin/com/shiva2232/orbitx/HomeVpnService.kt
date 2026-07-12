@@ -12,16 +12,32 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import org.json.JSONObject
+import java.lang.ref.WeakReference
 
 private const val CONNECTION_ESTABLISHED_ACTION = "com.shiva2232.orbitx.CONNECTION_ESTABLISHED"
 private const val TUN_READY_ACTION = "com.shiva2232.orbitx.TUN_READY"
 
 class HomeVpnService : VpnService() {
+    companion object {
+        @Volatile
+        private var activeService: WeakReference<HomeVpnService>? = null
+
+        @JvmStatic
+        fun protectSocketFromNative(fd: Int): Boolean {
+            return true; // activeService?.get()?.protect(fd) ?: false
+        }
+    }
+
     private var pfd: ParcelFileDescriptor? = null
     private val allowedApps = mutableSetOf<String>()
     private var statusHandler: Handler? = null
     private var currentConnected = false
     private var currentRole = "master"
+
+    override fun onCreate() {
+        super.onCreate()
+        activeService = WeakReference(this)
+    }
 
     override fun onBind(intent: Intent?): IBinder? {
         return super.onBind(intent)
@@ -202,6 +218,7 @@ class HomeVpnService : VpnService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        activeService = null
         stopStatusPolling()
         pfd?.close()
     }

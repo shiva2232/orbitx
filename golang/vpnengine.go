@@ -15,6 +15,72 @@ static void ReleaseStringUTFCharsC(JNIEnv *env, jstring str, const char* chars) 
 static jstring NewStringUTF_C(JNIEnv *env, const char* bytes) {
 	return (*env)->NewStringUTF(env, bytes);
 }
+
+static JavaVM* vpn_jvm = NULL;
+static jclass home_vpn_service_class = NULL;
+
+static void SaveJavaVMAndServiceClass(JNIEnv *env) {
+	if (env == NULL) {
+		return;
+	}
+	(*env)->GetJavaVM(env, &vpn_jvm);
+	if (home_vpn_service_class != NULL) {
+		return;
+	}
+	jclass local = (*env)->FindClass(env, "com/shiva2232/orbitx/HomeVpnService");
+	if ((*env)->ExceptionCheck(env)) {
+		(*env)->ExceptionClear(env);
+		return;
+	}
+	if (local == NULL) {
+		return;
+	}
+	home_vpn_service_class = (*env)->NewGlobalRef(env, local);
+	(*env)->DeleteLocalRef(env, local);
+}
+
+static int ProtectSocketFdC(int fd) {
+	if (vpn_jvm == NULL || home_vpn_service_class == NULL) {
+		return 0;
+	}
+
+	JNIEnv *env = NULL;
+	int shouldDetach = 0;
+	jint envResult = (*vpn_jvm)->GetEnv(vpn_jvm, (void**)&env, JNI_VERSION_1_6);
+	if (envResult == JNI_EDETACHED) {
+		if ((*vpn_jvm)->AttachCurrentThread(vpn_jvm, &env, NULL) != JNI_OK) {
+			return 0;
+		}
+		shouldDetach = 1;
+	} else if (envResult != JNI_OK) {
+		return 0;
+	}
+
+	jmethodID method = (*env)->GetStaticMethodID(env, home_vpn_service_class, "protectSocketFromNative", "(I)Z");
+	if ((*env)->ExceptionCheck(env)) {
+		(*env)->ExceptionClear(env);
+		if (shouldDetach) {
+			(*vpn_jvm)->DetachCurrentThread(vpn_jvm);
+		}
+		return 0;
+	}
+	if (method == NULL) {
+		if (shouldDetach) {
+			(*vpn_jvm)->DetachCurrentThread(vpn_jvm);
+		}
+		return 0;
+	}
+
+	jboolean protected = (*env)->CallStaticBooleanMethod(env, home_vpn_service_class, method, (jint)fd);
+	if ((*env)->ExceptionCheck(env)) {
+		(*env)->ExceptionClear(env);
+		protected = JNI_FALSE;
+	}
+	if (shouldDetach) {
+		(*vpn_jvm)->DetachCurrentThread(vpn_jvm);
+	}
+	return protected == JNI_TRUE ? 1 : 0;
+}
 */
 import "C"
 
@@ -33,6 +99,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 )
@@ -49,6 +116,7 @@ var (
 	lastPublishedIP   string
 	lastPublishedPort int
 	stunConn          *net.UDPConn
+	stunAddr          *net.UDPAddr
 	stunServer        = "stun.l.google.com:19302"
 	stunOnce          sync.Once
 	// internal channels for simulated WebRTC/data-channel placeholders
@@ -71,11 +139,13 @@ func SubmitTunFd(fd C.int) C.int {
 
 //export Java_com_shiva2232_orbitx_VpnBridge_submitTunFd
 func Java_com_shiva2232_orbitx_VpnBridge_submitTunFd(env *C.JNIEnv, clazz C.jclass, fd C.jint) C.jint {
+	C.SaveJavaVMAndServiceClass(env)
 	return SubmitTunFd(fd)
 }
 
 //export Java_com_shiva2232_orbitx_VpnBridge_startEngine
 func Java_com_shiva2232_orbitx_VpnBridge_startEngine(env *C.JNIEnv, clazz C.jclass, cpair C.jstring, crole C.jstring, csecret C.jstring) C.jint {
+	C.SaveJavaVMAndServiceClass(env)
 	pairPtr := C.GetStringUTFCharsC(env, cpair)
 	rolePtr := C.GetStringUTFCharsC(env, crole)
 	secretPtr := C.GetStringUTFCharsC(env, csecret)
@@ -196,6 +266,39 @@ func setStatus(m map[string]interface{}) {
 	mu.Unlock()
 }
 
+func protectSocketControl(network, address string, conn syscall.RawConn) error {
+	var protectErr error
+	if err := conn.Control(func(fd uintptr) {
+		if C.ProtectSocketFdC(C.int(fd)) != 1 {
+			protectErr = fmt.Errorf("android protect failed for %s %s", network, address)
+		}
+	}); err != nil {
+		return err
+	}
+	return protectErr
+}
+
+func protectedHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{
+		Timeout: timeout,
+		Control: func(network, address string, conn syscall.RawConn) error {
+			return protectSocketControl(network, address, conn)
+		},
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dialer.DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          10,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+}
+
 // writeEndpointToFirebase writes the local published endpoint record for signaling and keepalive.
 func writeEndpointToFirebase(hash, role, ip string, port int) error {
 	url := fmt.Sprintf("%s/pairings/%s/%s.json", firebaseDB, hash, role)
@@ -216,7 +319,7 @@ func writeEndpointToFirebase(hash, role, ip string, port int) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := protectedHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -235,13 +338,33 @@ func initializeStunConn() error {
 			err = e
 			return
 		}
-		stunConn, err = net.DialUDP("udp", nil, addr)
+		listenConfig := net.ListenConfig{
+			Control: func(network, address string, conn syscall.RawConn) error {
+				return protectSocketControl(network, address, conn)
+			},
+		}
+		packetConn, e := listenConfig.ListenPacket(context.Background(), "udp4", "0.0.0.0:0")
+		if e != nil {
+			err = e
+			return
+		}
+		udpConn, ok := packetConn.(*net.UDPConn)
+		if !ok {
+			_ = packetConn.Close()
+			err = errors.New("failed to create UDP STUN connection")
+			return
+		}
+		stunAddr = addr
+		stunConn = udpConn
 	})
 	if err != nil {
 		return err
 	}
 	if stunConn == nil {
 		return errors.New("failed to initialize STUN connection")
+	}
+	if stunAddr == nil {
+		return errors.New("failed to resolve STUN server")
 	}
 	return nil
 }
@@ -264,12 +387,12 @@ func stunBinding(timeout time.Duration) (string, int, error) {
 	}
 	copy(req[8:20], txid)
 
-	if _, err := stunConn.Write(req); err != nil {
+	if _, err := stunConn.WriteToUDP(req, stunAddr); err != nil {
 		return "", 0, err
 	}
 
 	resp := make([]byte, 1500)
-	n, err := stunConn.Read(resp)
+	n, _, err := stunConn.ReadFromUDP(resp)
 	if err != nil {
 		return "", 0, err
 	}
@@ -312,7 +435,7 @@ func getPublicIPPortFromStun() (string, int, error) {
 
 // getPublicIP queries a public service to determine this device's public IP.
 func getPublicIP() (string, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := protectedHTTPClient(5 * time.Second)
 	resp, err := client.Get("https://api.ipify.org?format=json")
 	if err != nil {
 		return "", err
@@ -625,6 +748,12 @@ func StopEngine() C.int {
 		cancelFn()
 		cancelFn = nil
 	}
+	if stunConn != nil {
+		_ = stunConn.Close()
+		stunConn = nil
+		stunAddr = nil
+		stunOnce = sync.Once{}
+	}
 	status = map[string]interface{}{"state": "DISCONNECTED"}
 	mu.Unlock()
 	return 0
@@ -649,11 +778,13 @@ func NotifyNetworkChanged() C.int {
 
 //export Java_com_shiva2232_orbitx_VpnBridge_notifyNetworkChanged
 func Java_com_shiva2232_orbitx_VpnBridge_notifyNetworkChanged(env *C.JNIEnv, clazz C.jclass) C.jint {
+	C.SaveJavaVMAndServiceClass(env)
 	return NotifyNetworkChanged()
 }
 
 //export Java_com_shiva2232_orbitx_VpnBridge_getStatusJSON
 func Java_com_shiva2232_orbitx_VpnBridge_getStatusJSON(env *C.JNIEnv, clazz C.jclass) C.jstring {
+	C.SaveJavaVMAndServiceClass(env)
 	cstr := GetStatusJSON()
 	if cstr == nil {
 		var zero C.jstring
