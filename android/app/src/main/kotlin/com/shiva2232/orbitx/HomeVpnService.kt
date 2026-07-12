@@ -21,6 +21,7 @@ class HomeVpnService : VpnService() {
     private val allowedApps = mutableSetOf<String>()
     private var statusHandler: Handler? = null
     private var currentConnected = false
+    private var currentRole = "master"
 
     override fun onBind(intent: Intent?): IBinder? {
         return super.onBind(intent)
@@ -32,6 +33,9 @@ class HomeVpnService : VpnService() {
         val pairingHash = intent?.getStringExtra("pairingHash")
         val role = intent?.getStringExtra("role")
         val preshared = intent?.getStringExtra("presharedSecret")
+        if (!role.isNullOrBlank()) {
+            currentRole = role
+        }
 
         // handle dynamic add allowed app action
         if (intent?.action == "com.shiva2232.orbitx.ACTION_ADD_ALLOWED_APP") {
@@ -53,7 +57,7 @@ class HomeVpnService : VpnService() {
             return START_STICKY
         }
 
-        pfd = establishTunnel()
+        pfd = establishTunnel(currentRole)
         pfd?.let {
             val tunReadyIntent = Intent(TUN_READY_ACTION).setPackage(packageName)
             sendBroadcast(tunReadyIntent)
@@ -73,9 +77,15 @@ class HomeVpnService : VpnService() {
         return START_STICKY
     }
 
-    fun establishTunnel(): ParcelFileDescriptor? {
+    fun establishTunnel(role: String = currentRole): ParcelFileDescriptor? {
         val builder = Builder()
-        builder.addAddress("10.99.0.1", 32)
+        if (role.equals("slave", ignoreCase = true)) {
+            builder.addAddress("10.99.0.2", 32)
+            builder.addRoute("10.99.0.1", 32)
+        } else {
+            builder.addAddress("10.99.0.1", 32)
+            builder.addRoute("10.99.0.2", 32)
+        }
         builder.setMtu(1400)
         configureSplitTunnel(builder, "192.168.50.0/24")
         // Restrict VPN to configured allowed apps so other apps keep using normal network
@@ -109,7 +119,7 @@ class HomeVpnService : VpnService() {
             e.printStackTrace()
         }
         // establish fresh
-        pfd = establishTunnel()
+        pfd = establishTunnel(currentRole)
         pfd?.let {
             val intent = Intent(TUN_READY_ACTION).setPackage(packageName)
             sendBroadcast(intent)
