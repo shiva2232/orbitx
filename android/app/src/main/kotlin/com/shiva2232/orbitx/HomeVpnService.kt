@@ -32,6 +32,7 @@ class HomeVpnService : VpnService() {
                 // re-establish tunnel to apply new allowed apps
                 reestablishTunnelWithAllowedApps()
             }
+            startForegroundNotification()
             return START_STICKY
         }
         // handle dynamic remove allowed app action
@@ -41,6 +42,7 @@ class HomeVpnService : VpnService() {
                 allowedApps.remove(pkg)
                 reestablishTunnelWithAllowedApps()
             }
+            startForegroundNotification()
             return START_STICKY
         }
 

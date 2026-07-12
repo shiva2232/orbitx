@@ -119,7 +119,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   List<AppInfo> apps = [];
   StreamSubscription<Uint8List>? _subs;
   double width = 0.0;
-  final PageController pageController = PageController(initialPage: 1);
+  final PageController pageController = PageController(initialPage: 0);
   double steps = 0;
   final ScrollController scrollController = ScrollController();
   List<AppInfo> filtered = [];
@@ -130,200 +130,217 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       extendBody: true,
       body: PopScope(
         canPop: false,
-        child: PageView(
-          controller: pageController,
+        child: Stack(
           children: [
-            Container(color: Colors.black, child: MapView()),
-            Container(
-              color: Colors.black,
-              child: AppsScreen(apps: apps),
-            ),
-            Container(
-              color: Colors.green,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Container(
-                    color: Color.from(
-                      alpha: 0.5,
-                      red: 0.0,
-                      green: 0.5,
-                      blue: 0.5,
+            PageView(
+            controller: pageController,
+            children: [
+              Container(
+                color: Colors.green,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Container(
+                      color: Color.from(
+                        alpha: 0.5,
+                        red: 0.0,
+                        green: 0.5,
+                        blue: 0.5,
+                      ),
+                      child: Padding(
+                        padding: EdgeInsetsGeometry.all(5),
+                        child: TextField(
+                          onChanged: (value) {
+                            setState(() {
+                              filtered = apps
+                                  .where(
+                                    (app) => app.name.toLowerCase().contains(
+                                      value.toLowerCase(),
+                                    ),
+                                  )
+                                  .toList();
+                            });
+                          },
+                        ),
+                      ),
                     ),
-                    child: Padding(
-                      padding: EdgeInsetsGeometry.all(5),
-                      child: TextField(
-                        onChanged: (value) {
-                          setState(() {
-                            filtered = apps
-                                .where(
-                                  (app) => app.name.toLowerCase().contains(
-                                    value.toLowerCase(),
+                    Expanded(
+                      child: ListView.builder(
+                        controller: scrollController,
+                        padding: EdgeInsets.zero,
+                        scrollDirection: Axis.vertical,
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
+                          final app = filtered[index];
+                          return Dismissible(
+                            // 2. Assign a unique key matching the data object (Crucial for ListView performance)
+                            key: Key(app.packageName),
+          
+                            // 3. Set the swipe direction
+                            direction: DismissDirection.horizontal,
+          
+                            // Visual background when swiping right (e.g., Save/Archive)
+                            background: Container(
+                              color: Colors.green,
+                              alignment: Alignment.centerLeft,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20.0,
+                              ),
+                              child: const Icon(
+                                Icons.archive,
+                                color: Colors.white,
+                              ),
+                            ),
+          
+                            // Visual background when swiping left (e.g., Delete)
+                            secondaryBackground: Container(
+                              color: Colors.red,
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20.0,
+                              ),
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                              ),
+                            ),
+          
+                            // 4. Handle confirmation logic (Optional: e.g., show an alert before deleting)
+                            confirmDismiss: (direction) async {
+                              if (direction == DismissDirection.endToStart) {
+                                // Return true to allow dismissal, false to cancel
+                                pageController.animateToPage(
+                                  1,
+                                  duration: Duration(milliseconds: 200),
+                                  curve: Curves.easeInOut,
+                                );
+                                return false;
+                              }
+                              // Allow swipe right unconditionally
+                              addOrRemoveVpn(app.packageName).then((val) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      val['result'] == true
+                                          ? '${val['isAdd'] == true ? 'Added' : 'Removed'} to VPN'
+                                          : 'Failed',
+                                    ),
                                   ),
-                                )
-                                .toList();
-                          });
+                                );
+                              });
+                              return false;
+                            },
+          
+                            // 5. Handle state changes when a swipe finishes
+                            onDismissed: (direction) {
+                              if (direction == DismissDirection.startToEnd) {
+                                // Handle swipe right action (e.g., archive)
+                              } else if (direction ==
+                                  DismissDirection.endToStart) {}
+                            },
+          
+                            // The actual item content
+                            child: Material(
+                              color: Color.from(
+                                alpha: 0.5,
+                                red: 0.1,
+                                green: 0.1,
+                                blue: 0.1,
+                              ),
+                              child: ListTile(
+                                onTap: () {
+                                  InstalledApps.startApp(app.packageName);
+                                },
+                                onLongPress: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: Text(app.name),
+                                      content: Text(
+                                        'Package: ${app.packageName}',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context),
+                                          child: const Text('Close'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () {
+                                            InstalledApps.uninstallApp(
+                                              app.packageName,
+                                            );
+                                            Navigator.pop(context);
+                                          },
+                                          child: const Text('Uninstall'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                                leading: Image.memory(
+                                  app.icon!,
+                                  fit: BoxFit.contain,
+                                  width: 32,
+                                  height: 32,
+                                ),
+                                subtitle: Text(app.packageName),
+                                title: Text(app.name),
+                                trailing: Text(app.versionName),
+                                tileColor: Color.fromARGB(122, 167, 167, 167),
+                                hoverColor: Color.fromARGB(134, 35, 53, 88),
+                                titleAlignment: ListTileTitleAlignment.center,
+                                style: ListTileStyle.list,
+                              ),
+                            ),
+                          );
                         },
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      controller: scrollController,
-                      padding: EdgeInsets.zero,
-                      scrollDirection: Axis.vertical,
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
-                        final app = filtered[index];
-                        return Dismissible(
-                          // 2. Assign a unique key matching the data object (Crucial for ListView performance)
-                          key: Key(app.packageName),
-
-                          // 3. Set the swipe direction
-                          direction: DismissDirection.horizontal,
-
-                          // Visual background when swiping right (e.g., Save/Archive)
-                          background: Container(
-                            color: Colors.green,
-                            alignment: Alignment.centerLeft,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20.0,
-                            ),
-                            child: const Icon(
-                              Icons.archive,
-                              color: Colors.white,
-                            ),
-                          ),
-
-                          // Visual background when swiping left (e.g., Delete)
-                          secondaryBackground: Container(
-                            color: Colors.red,
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20.0,
-                            ),
-                            child: const Icon(
-                              Icons.delete,
-                              color: Colors.white,
-                            ),
-                          ),
-
-                          // 4. Handle confirmation logic (Optional: e.g., show an alert before deleting)
-                          confirmDismiss: (direction) async {
-                            if (direction == DismissDirection.endToStart) {
-                              // Return true to allow dismissal, false to cancel
-                              return false;
-                            }
-                            // Allow swipe right unconditionally
-                            return true;
-                          },
-
-                          // 5. Handle state changes when a swipe finishes
-                          onDismissed: (direction) {
-                            if (direction == DismissDirection.startToEnd) {
-                              // Handle swipe right action (e.g., archive)
-                              addOrRemoveVpn(app.packageName).then((val){
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(val['result']==true ? '${val['isAdd']==true? 'Added':'Removed'} to VPN' : 'Failed')));
-                              });
-                            } else if (direction ==
-                                DismissDirection.endToStart) {
-                              // Handle swipe left action (e.g., delete)
-                              // InstalledApps.uninstallApp(app.packageName);
-                            }
-                          },
-
-                          // The actual item content
-                          child: Material(
-                            color: Color.from(
-                              alpha: 0.5,
-                              red: 0.1,
-                              green: 0.1,
-                              blue: 0.1,
-                            ),
-                            child: ListTile(
-                              onTap: () {
-                                InstalledApps.startApp(app.packageName);
-                              },
-                              onLongPress: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: Text(app.name),
-                                    content: Text(
-                                      'Package: ${app.packageName}',
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text('Close'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () {
-                                          InstalledApps.uninstallApp(
-                                            app.packageName,
-                                          );
-                                          Navigator.pop(context);
-                                        },
-                                        child: const Text('Uninstall'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                              leading: Image.memory(
-                                app.icon!,
-                                fit: BoxFit.contain,
-                                width: 32,
-                                height: 32,
-                              ),
-                              subtitle: Text(app.packageName),
-                              title: Text(app.name),
-                              trailing: Text(app.versionName),
-                              tileColor: Color.fromARGB(122, 167, 167, 167),
-                              hoverColor: Color.fromARGB(134, 35, 53, 88),
-                              titleAlignment: ListTileTitleAlignment.center,
-                              style: ListTileStyle.list,
-                            ),
+                    Slider(
+                      value: steps,
+                      label: String.fromCharCode(97 + steps.round()),
+                      onChanged: (step) {
+                        setState(() {
+                          steps = step;
+                        });
+                        final int index = apps.indexWhere(
+                          (app) => app.name.toLowerCase().startsWith(
+                            String.fromCharCode(97 + step.round()),
                           ),
                         );
+                        debugPrint("$index $index $step ${index * width} $width");
+                        if (index != -1) {
+                          scrollController.animateTo(
+                            index * width,
+                            duration: const Duration(milliseconds: 700),
+                            curve: Curves.easeOutCubic,
+                          );
+                        }
                       },
+                      min: 0,
+                      max: 27,
+                      divisions: 27,
                     ),
-                  ),
-                  Slider(
-                    value: steps,
-                    label: String.fromCharCode(97 + steps.round()),
-                    onChanged: (step) {
-                      setState(() {
-                        steps = step;
-                      });
-                      final int index = apps.indexWhere(
-                        (app) => app.name.toLowerCase().startsWith(
-                          String.fromCharCode(97 + step.round()),
-                        ),
-                      );
-                      debugPrint("$index $index $step ${index * width} $width");
-                      if (index != -1) {
-                        scrollController.animateTo(
-                          index * width,
-                          duration: const Duration(milliseconds: 700),
-                          curve: Curves.easeOutCubic,
-                        );
-                      }
-                    },
-                    min: 0,
-                    max: 27,
-                    divisions: 27,
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Container(color: Colors.black, child: ScriptPage()),
-            WeatherScreen(),
-            UtilPage(),
-            Container(color: Colors.black, child: Xterm()),
-          ],
-        ),
-      ),
+              Container(color: Colors.black, child: ScriptPage()),
+              WeatherScreen(),
+              Container(
+                color: Colors.black,
+                child: AppsScreen(apps: apps),
+              ),
+              Container(color: Colors.black, child: MapView()),
+              UtilPage(),
+              Container(color: Colors.black, child: Xterm()),
+            ],
+          ),
+        Positioned(child: SizedBox(
+          height: MediaQuery.of(context).size.shortestSide-100,
+          width: MediaQuery.of(context).size.shortestSide-100,
+        ))
+        ]),
+    ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
           Permission.notification.isGranted.then((value) {
