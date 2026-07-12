@@ -1,12 +1,14 @@
 import 'dart:async';
+import 'package:flutter/material.dart' show debugPrint;
 import 'package:flutter/services.dart';
-import 'vpn_engine_ffi.dart';
+import 'vpn_engine_ffi.dart' as ffi;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class VpnController {
   static const _platform = MethodChannel('com.home.vpn/permission');
 
-  final StreamController<Map<String, dynamic>> _statusController = StreamController.broadcast();
+  final StreamController<Map<String, dynamic>> _statusController =
+      StreamController.broadcast();
   final Set<String> _allowed = {};
 
   Completer<bool>? _tunReadyCompleter;
@@ -50,28 +52,42 @@ class VpnController {
     }
   }
 
-  Future<bool> requestPermissionAndStart(String pairingHash, String role, String preshared) async {
-    _tunReadyCompleter = Completer<bool>();
+  Future<bool> requestPermissionAndStart(
+    String pairingHash,
+    String role,
+    String preshared,
+  ) async {
+    final completer = Completer<bool>();
+    _tunReadyCompleter = completer;
     final ok = await _platform.invokeMethod('requestPermission', {
       'pairingHash': pairingHash,
       'role': role,
       'presharedSecret': preshared,
     });
+    debugPrint("permission granted? $ok");
     if (ok != true) {
-      _tunReadyCompleter = null;
+      debugPrint("permission denied");
+      if (_tunReadyCompleter == completer) {
+        _tunReadyCompleter = null;
+      }
       return false;
     }
     try {
-      return await _tunReadyCompleter!.future.timeout(const Duration(seconds: 10));
-    } catch (_) {
-      _tunReadyCompleter = null;
+      return await completer.future.timeout(const Duration(seconds: 10));
+    } catch (err) {
+      debugPrint("catched error $err");
+      if (_tunReadyCompleter == completer) {
+        _tunReadyCompleter = null;
+      }
       return false;
     }
   }
 
   Future<bool> addAllowedApp(String packageName) async {
     try {
-      final ok = await _platform.invokeMethod('addAllowedApp', {'packageName': packageName});
+      final ok = await _platform.invokeMethod('addAllowedApp', {
+        'packageName': packageName,
+      });
       if (ok == true) {
         _allowed.add(packageName);
         await _saveAllowedApps();
@@ -85,7 +101,9 @@ class VpnController {
 
   Future<bool> removeAllowedApp(String packageName) async {
     try {
-      final ok = await _platform.invokeMethod('removeAllowedApp', {'packageName': packageName});
+      final ok = await _platform.invokeMethod('removeAllowedApp', {
+        'packageName': packageName,
+      });
       if (ok == true) {
         _allowed.remove(packageName);
         await _saveAllowedApps();
@@ -106,16 +124,12 @@ class VpnController {
 
   // FFI wrappers
   int startEngineViaFFI(String pairingHash, String role, String preshared) {
-    return startEngine(pairingHash, role, preshared);
+    return ffi.startEngine(pairingHash, role, preshared);
   }
 
-  int stopEngine() => stopEngineWrapper();
+  int stopEngine() => ffi.stopEngine();
 
   Stream<Map<String, dynamic>> get events => _statusController.stream;
 
   bool isAllowed(String packageName) => _allowed.contains(packageName);
-
 }
-
-// helper to expose stopEngine name consistent with FFI file
-int stopEngineWrapper() => stopEngine();

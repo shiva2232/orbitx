@@ -14,6 +14,7 @@ import android.os.ParcelFileDescriptor
 import org.json.JSONObject
 
 private const val CONNECTION_ESTABLISHED_ACTION = "com.shiva2232.orbitx.CONNECTION_ESTABLISHED"
+private const val TUN_READY_ACTION = "com.shiva2232.orbitx.TUN_READY"
 
 class HomeVpnService : VpnService() {
     private var pfd: ParcelFileDescriptor? = null
@@ -54,6 +55,9 @@ class HomeVpnService : VpnService() {
 
         pfd = establishTunnel()
         pfd?.let {
+            val tunReadyIntent = Intent(TUN_READY_ACTION).setPackage(packageName)
+            sendBroadcast(tunReadyIntent)
+
             // Keep ParcelFileDescriptor alive and handoff raw fd to native engine
             try {
                 VpnBridge.submitTunFd(it.fd)
@@ -61,9 +65,6 @@ class HomeVpnService : VpnService() {
                     VpnBridge.startEngine(pairingHash, role, preshared ?: "")
                     startStatusPolling()
                 }
-                // notify Flutter/UI that TUN is ready
-                val tunReadyIntent = Intent("com.shiva2232.orbitx.TUN_READY")
-                sendBroadcast(tunReadyIntent)
             } catch (e: Throwable) {
                 e.printStackTrace()
             }
@@ -110,10 +111,11 @@ class HomeVpnService : VpnService() {
         // establish fresh
         pfd = establishTunnel()
         pfd?.let {
+            val intent = Intent(TUN_READY_ACTION).setPackage(packageName)
+            sendBroadcast(intent)
+
             try {
                 VpnBridge.submitTunFd(it.fd)
-                val intent = Intent("com.shiva2232.orbitx.TUN_READY")
-                sendBroadcast(intent)
             } catch (e: Throwable) {
                 e.printStackTrace()
             }
@@ -121,7 +123,7 @@ class HomeVpnService : VpnService() {
     }
 
     private fun sendConnectionBroadcast(peerIp: String? = null, peerPort: Int = 0) {
-        val connectedIntent = Intent(CONNECTION_ESTABLISHED_ACTION)
+        val connectedIntent = Intent(CONNECTION_ESTABLISHED_ACTION).setPackage(packageName)
         if (!peerIp.isNullOrBlank()) {
             connectedIntent.putExtra("peerIp", peerIp)
         }
@@ -138,7 +140,7 @@ class HomeVpnService : VpnService() {
                 if (!statusJson.isNullOrBlank()) {
                     val json = JSONObject(statusJson)
                     val state = json.optString("state", "")
-                    val peerIp = json.optString("peerIp", null)
+                    val peerIp = json.optString("peerIp", "").takeIf { it.isNotBlank() }
                     val peerPort = json.optInt("peerPort", 0)
                     if (state == "CONNECTED" && !currentConnected) {
                         currentConnected = true

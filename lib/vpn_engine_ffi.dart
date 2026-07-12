@@ -1,8 +1,11 @@
 import 'dart:ffi';
 import 'dart:convert';
+import 'dart:io';
 import 'package:ffi/ffi.dart';
 
-final DynamicLibrary _lib = DynamicLibrary.process();
+final DynamicLibrary _lib = Platform.isAndroid
+    ? DynamicLibrary.open('libvpnengine.so')
+    : DynamicLibrary.process();
 
 typedef _c_StartEngine = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);
 typedef _dart_StartEngine = int Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>);

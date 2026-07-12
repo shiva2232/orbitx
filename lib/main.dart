@@ -375,7 +375,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             subtitle: Text(
                               tunnelConnected
                                   ? 'Connected: ${tunnelPeerIp ?? 'unknown'}:${tunnelPeerPort ?? 0}'
-                                  : (vpnEnabled ? 'Waiting for tunnel...' : 'Tap switch to enable VPN'),
+                                  : (vpnEnabled
+                                        ? 'Waiting for tunnel...'
+                                        : 'Tap switch to enable VPN'),
                             ),
                             trailing: Switch(
                               value: vpnEnabled,
@@ -469,7 +471,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    value ? 'Role set to MASTER' : 'Role set to SLAVE',
+                                    value
+                                        ? 'Role set to MASTER'
+                                        : 'Role set to SLAVE',
                                   ),
                                 ),
                               );
@@ -590,10 +594,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _setVpnEnabled(bool enabled) async {
+    setState(() {
+      vpnEnabled = enabled;
+    });
+
     if (!enabled) {
       await controller.stopService();
       setState(() {
-        vpnEnabled = false;
         tunnelConnected = false;
         tunnelPeerIp = null;
         tunnelPeerPort = null;
@@ -608,17 +615,17 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       'presharedSecret',
     );
     if (!ok) {
+      debugPrint("ok is $ok");
       setState(() {
         vpnEnabled = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('VPN permission denied or failed to start')),
+        const SnackBar(
+          content: Text('VPN permission denied or failed to start'),
+        ),
       );
       return;
     }
-    setState(() {
-      vpnEnabled = true;
-    });
   }
 
   Future<Map<String, bool>> addOrRemoveVpn(String packageName) async {

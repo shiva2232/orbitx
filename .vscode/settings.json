@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "C:/Users/vsiva/Documents/flutter/automotives/orbitx/linux"
+    "cmake.sourceDirectory": "C:/Users/vsiva/Documents/flutter/automotives/orbitx/linux",
+    "java.compile.nullAnalysis.mode": "automatic"
 }
