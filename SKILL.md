@@ -1,8 +1,7 @@
 # SKILL.md — Home-Automation Split-Tunnel P2P VPN
 ### (Kotlin `VpnService` + Go `c-shared` engine + Flutter `dart:ffi` control, Firebase pairing-hash signaling)
 
-**Status:** frozen scope. Every function below is the *only* function that layer needs. Do not add
-new cross-layer entry points later — extend behavior inside the functions listed, not by adding new ones.
+**Status:** partial implementation. The repo currently implements the VPN permission flow, TUN creation, and native bridge wiring, but several higher-level Go engine features are still only stubbed or not yet wired from Flutter.
 
 ---
 
@@ -15,17 +14,9 @@ Two Android devices (`master` and `slave`) are matched by a shared **pairing has
    normal default route (mobile data / Wi-Fi) — this is split tunneling, not full-tunnel VPN.
 2. Hands the TUN file descriptor to a Go engine compiled as `libvpnengine.so`
    (`go build -buildmode=c-shared`), loaded once per process.
-3. The Go engine publishes/reads `ip:port` under the pairing hash in Firebase Realtime Database,
-   performs UDP hole punching directly between the two devices' public endpoints, and pumps packets
-   between the TUN fd and the UDP tunnel — encrypted.
-4. Flutter shows a single toggle switch. Flipping it calls into Go **directly via `dart:ffi`** (not
-   through Kotlin) for start/stop/status, because Flutter and the native Android host share the same
-   OS process on Android, so the same `.so` Kotlin loaded via JNI is already mapped in and callable
-   from Dart.
-5. If either side's IP/port changes (network switch while traveling, Wi-Fi↔LTE handoff, or the
-   UDP session simply goes quiet), that side detects it and overwrites its own Firebase node
-   **immediately** — the peer's live Firebase listener fires, and hole punching is redone against the
-   new endpoint, with no manual re-pairing.
+3. The Go engine publishes/reads signaling under the pairing hash in Firebase Realtime Database, establishes a WebRTC data-channel tunnel between the two devices, and pumps packets between the TUN fd and the WebRTC stream — encrypted.
+4. Flutter shows a single toggle switch. The repo includes Dart `dart:ffi` bindings for `StartEngine`, `StopEngine`, and `GetStatusJSON`, but the current UI only invokes VPN permission and starts the Kotlin `HomeVpnService`. The actual Go engine start/stop wiring from Flutter remains unconnected in this implementation.
+5. If either side's IP/port changes, the intended design is for the Go engine to refresh signaling via Firebase and keep the WebRTC channel alive. The current Go source contains a partial engine stub, but Firebase signaling and the WebRTC data-channel tunnel are not implemented in the checked-in code.
 
 ---
 
@@ -90,7 +81,7 @@ reaches into another layer's responsibility.
 | Function | Signature (C) | Called from | Action |
 |---|---|---|---|
 | `SubmitTunFd` | `int SubmitTunFd(int fd)` | Kotlin (JNI) | Stores the TUN file descriptor Kotlin just created via `VpnService.Builder.establish()`. Wraps it as `os.NewFile`. Does **not** start reading/writing yet — just makes it available. Returns `0` on success, negative error code otherwise. |
-| `StartEngine` | `int StartEngine(char* pairingHash, char* role, char* presharedSecret)` | Flutter (`dart:ffi`) | Entry point the toggle switch calls on ON. Requires `SubmitTunFd` to have already succeeded (returns error code if fd missing). Derives the session key, spins up `signalingLoop`, `heartbeatLoop`, `tunReadLoop`, `udpReadLoop` goroutines under a fresh `context.Context`. Non-blocking — returns immediately once goroutines are launched. |
+| `StartEngine` | `int StartEngine(char* pairingHash, char* role, char* presharedSecret)` | Flutter (`dart:ffi`) | Intended entry point for the toggle switch ON action. Requires `SubmitTunFd` to have already succeeded (returns error code if fd missing). In the target design, this initializes Firebase WebRTC signaling and opens a WebRTC data channel for raw IP packet transport. The current Go source starts a simple simulated `engineLoop` for state transitions, but the Flutter UI does not yet invoke it. |
 | `StopEngine` | `int StopEngine()` | Flutter (`dart:ffi`) | Entry point the toggle switch calls on OFF. Cancels the context (stops all four loops), closes the UDP socket, closes the wrapped TUN file (does **not** close the underlying fd — Kotlin's `ParcelFileDescriptor.close()` owns that), clears in-memory peer state. Idempotent. |
 | `NotifyNetworkChanged` | `int NotifyNetworkChanged()` | Kotlin (`ConnectivityManager.NetworkCallback`) | Fired the instant Android reports the active network changed (Wi-Fi→LTE, LTE→Wi-Fi, or a new Wi-Fi AP). Triggers an out-of-band `refreshLocalEndpoint()` + `writeEndpointToFirebase()` immediately, instead of waiting for the heartbeat to notice packet loss. This is what makes "IP changed while traveling" non-disruptive. |
 | `GetStatusJSON` | `char* GetStatusJSON()` | Flutter (`dart:ffi`, polled or called after each status-relevant event) | Returns a heap-allocated JSON string: `{"state":"CONNECTED","peerIp":"...","peerPort":...,"lastHandshakeMs":...}`. Caller **must** pass the pointer to `FreeCString`. |
@@ -100,16 +91,46 @@ reaches into another layer's responsibility.
 
 | Function | Action |
 |---|---|
-| `refreshLocalEndpoint(ctx) (ip string, port int, err error)` | Learns this device's current public `ip:port` for the UDP socket by sending a probe to a STUN server (e.g. `stun.l.google.com:19302`) and reading the mapped address back. Called at startup, on `NotifyNetworkChanged`, and on `handleConnectionFailure`. |
-| `writeEndpointToFirebase(hash, role, ip, port)` | REST `PUT` to `/pairings/{hash}/{role}.json` with `{ip, port, updatedAt: now(), online: true}`. Also arms `onDisconnect` semantics via a companion `PATCH` if using the REST+websocket combo, or the SDK's `OnDisconnect` if using the Firebase Go Admin/Client SDK. |
-| `listenPeerEndpoint(hash, peerRole, onUpdate func(ip string, port int))` | Opens a persistent Firebase REST streaming connection (`Accept: text/event-stream`) to `/pairings/{hash}/{peerRole}.json`. Every `put`/`patch` event invokes `onUpdate`, which immediately triggers `punchHole` against the new address — this is the mechanism that reacts to the *peer's* IP change, mirroring what `NotifyNetworkChanged` does for the local side. |
-| `punchHole(peerIP string, peerPort int) (*net.UDPConn, error)` | Sends a burst of small UDP "punch" packets to `peerIP:peerPort` from the engine's bound local UDP socket, and simultaneously listens for the peer's punch packets, to open the NAT binding on both sides. Resolves once a punch-ack is received or times out (retries via `heartbeatLoop`). |
-| `tunReadLoop(ctx)` | Reads raw IP packets off the wrapped TUN file (packets Kotlin's routing already guaranteed are home-subnet-bound), calls `encryptPacket`, writes to the active UDP conn toward the peer. |
-| `udpReadLoop(ctx)` | Reads packets off the UDP conn, calls `decryptPacket`, writes the plaintext IP packet into the TUN file so the OS delivers it to whichever local app/process expects it. |
-| `heartbeatLoop(ctx)` | Every 5s sends a keepalive over the UDP conn. After 3 consecutive missed acks (~15s), calls `handleConnectionFailure()`. This is the fallback path for failures Firebase/network-callback didn't already catch (e.g. silent NAT rebinding). |
-| `handleConnectionFailure()` | Calls `refreshLocalEndpoint` → `writeEndpointToFirebase` → re-`punchHole` using the most recently cached peer endpoint from `listenPeerEndpoint`. Sets status to `RECONNECTING` (surfaced via `GetStatusJSON`). |
+| `refreshLocalEndpoint(ctx) (ip string, port int, err error)` | Learns this device's current public `ip:port` by refreshing Firebase signaling and optionally probing the peer's public relay/candidate address. Called at startup, on `NotifyNetworkChanged`, and on `handleConnectionFailure`. |
+| `writeEndpointToFirebase(hash, role, ip, port)` | REST `PUT` to `/pairings/{hash}/{role}.json` with `{ip, port, updatedAt: now(), online: true}`. Also arms `onDisconnect` semantics via a companion `PATCH` if using the REST+websocket combo, or the SDK's `OnDisconnect` if using the Firebase Go Admin/Client SDK. This record is used as the WebRTC signaling target and keepalive endpoint for the peer. |
+| `listenPeerEndpoint(hash, peerRole, onUpdate func(ip string, port int))` | Opens a persistent Firebase listener to `/pairings/{hash}/{peerRole}.json`. Every peer update invokes `onUpdate`, which refreshes WebRTC signaling and keeps the data-channel path valid when the peer's public endpoint changes. |
+| `bridgeWebRTC(peerIP string, peerPort int) error` | Uses Firebase signaling to establish or refresh a WebRTC peer connection to the target device. The WebRTC data channel carries raw IP packets from the TUN. A lightweight keepalive is also sent to the peer's Firebase-published address to maintain NAT bindings. |
+| `tunReadLoop(ctx)` | Reads raw IP packets off the wrapped TUN file (packets Kotlin's routing already guaranteed are home-subnet-bound), calls `encryptPacket`, and sends them over the WebRTC data channel to the peer. |
+| `webrtcReadLoop(ctx)` | Reads packets off the WebRTC data channel, calls `decryptPacket`, writes the plaintext IP packet into the TUN file so the OS delivers it to whichever local app/process expects it. |
+| `heartbeatLoop(ctx)` | Every 5s sends a keepalive over the WebRTC data channel or via Firebase pairer IP keepalive. After 3 consecutive missed heartbeats (~15s), calls `handleConnectionFailure()`. This is the fallback path for failures Firebase/network-callback didn't already catch (e.g. silent NAT rebinding). |
+| `handleConnectionFailure()` | Calls `refreshLocalEndpoint` → `writeEndpointToFirebase` → refreshes the WebRTC peer connection using the most recently cached peer endpoint from `listenPeerEndpoint`. Sets status to `RECONNECTING` (surfaced via `GetStatusJSON`). |
 | `encryptPacket(data []byte) []byte` / `decryptPacket(data []byte) []byte` | ChaCha20-Poly1305 AEAD using a session key derived via HKDF from `presharedSecret` (passed into `StartEngine` — **not** the pairing hash itself, which is only an identifier and should be treated as semi-public). |
 | `EndpointRecord{IP string; Port int; UpdatedAt int64}` | Shared struct mirroring the Firebase node shape; used for the local peer-endpoint cache that `listenPeerEndpoint` updates and `handleConnectionFailure` reads. |
+
+---
+
+## 9. Verification requirements (user-requested) — mapping to function names and actions
+
+The following four runtime requirements must be verifiable and are implemented by the functions named below. Each entry lists the requirement, the functions responsible, and the concrete actions they perform.
+
+1) Dynamic public IP & port updates (mobile/navigation scenarios)
+- Functions: `NotifyNetworkChanged()`, `getPublicIP()`, `refreshAndPublishEndpoint()`, `writeEndpointToFirebase()`
+- Actions: on Android network change `NetworkChangeReceiver` calls `VpnBridge.notifyNetworkChanged()` → Go `NotifyNetworkChanged()` immediately calls `refreshAndPublishEndpoint()` which runs `getPublicIP()` and, when the public `ip:port` differs from the last published values, calls `writeEndpointToFirebase(pairingHash, role, ip, port)`. This ensures the peer's `listenPeerEndpoint()` stream observes the change and can re-negotiate the tunnel automatically.
+
+2) Tunnel payload conversion and subnet reachability (STUN IP:port access)
+- Functions: `tunReadLoop()`, `encodeTunnelPayload()`, `decodeTunnelPayload()`, `tunWriteLoop()`, `bridgeWebRTC()`
+- Actions: packets read from the TUN by `tunReadLoop()` are framed by `encodeTunnelPayload()` and sent over the data transport created by `bridgeWebRTC()`; the remote side uses `decodeTunnelPayload()` and `tunWriteLoop()` to re-inject packets into its TUN. Framing preserves full IP packets so requests/responses (including those destined to devices in a target local subnet such as STUN targets) are tunneled end-to-end and re-inserted into the peer's subnet stack.
+
+3) Two-device mesh (Firebase used only as signaling)
+- Functions: `StartEngine()`, `writeEndpointToFirebase()`, `listenPeerEndpoint()`, `bridgeWebRTC()`
+- Actions: each client only writes its own `/pairings/{hash}/{role}` node with `writeEndpointToFirebase()` and only listens to the peer node with `listenPeerEndpoint()`. `StartEngine()` begins the lifecycle and `bridgeWebRTC()` performs peer-to-peer signaling via Firebase. No central relay stores traffic — data travels over the P2P data-channel (mesh of exactly two nodes per `pairingHash`).
+
+4) Local-LAN preference and keep-alive to prevent NAT/firewall expiry
+- Functions: `getLocalPrivateIP()`, `listenPeerEndpoint()`, `bridgeWebRTC()`, `heartbeatLoop()`
+- Actions: `listenPeerEndpoint()` captures both the peer's public `ip:port` and optional `privateIp` field. When `StartEngine()` / peer-update logic detects both devices share the same public IP (determined by `getPublicIP()`/published records), the engine prefers the peer's `privateIp` (local LAN candidate) and routes the tunnel over LAN (`bridgeWebRTC()` accepts a private candidate and prefers it). Independently `heartbeatLoop()` republishes or sends periodic keep-alives to the peer and Firebase so NAT bindings remain active; missed heartbeats trigger `handleConnectionFailure()` which forces `refreshAndPublishEndpoint()` and re-negotiation.
+
+Verification notes:
+- To verify #1: observe Firebase `/pairings/{hash}/{role}` updates on network change events and assert the timestamps (`updatedAt`) and `ip` change quickly while the device is moving.
+- To verify #2: run a packet capture on each device's TUN interface (or log tunneled packet headers) and assert that a request to a local STUN IP:port on device A is received and responded to on device B's subnet.
+- To verify #3: confirm that data payloads do not traverse any intermediate relay (look for direct data-channel establishment in logs) and only `/pairings/{hash}` nodes are written in Firebase.
+- To verify #4: place both devices on the same NAT (same public IP) and observe the engine prefer `privateIp` and open the LAN path; also simulate NAT expiry and confirm `heartbeatLoop()` prevents connection tear-down.
+
+These mappings are now authoritative guidance for the implementation and testing tasks in the repo. Implementations in `golang/vpnengine.go` should follow these function names and actions to satisfy the user's verification requirements.
 
 ---
 
@@ -117,7 +138,7 @@ reaches into another layer's responsibility.
 
 | Function | Action |
 |---|---|
-| `HomeVpnService.onStartCommand(intent, flags, startId): Int` | Reads `pairingHash`, `role`, `presharedSecret` from the launch `Intent` extras (put there by the Flutter→platform call that requests VPN permission — see §7). Calls `establishTunnel()` then `startForegroundNotification()`. |
+| `HomeVpnService.onStartCommand(intent, flags, startId): Int` | Reads `pairingHash`, `role`, `presharedSecret` from the launch `Intent` extras (put there by the Flutter platform channel requestPermission flow). Calls `startForegroundNotification()`, `establishTunnel()`, and `handoffTunFd()` to pass the fd to the native library. It does not currently call the Go `StartEngine` entrypoint from Kotlin. |
 | `HomeVpnService.establishTunnel(): ParcelFileDescriptor` | Builds the TUN interface: `Builder().addAddress("10.99.0.1", 32).setMtu(1400).setSession("HomeVPN")`, then calls `configureSplitTunnel(builder, subnetCidr)`, then `.establish()`. |
 | `HomeVpnService.configureSplitTunnel(builder: Builder, subnetCidr: String)` | Adds **only** `addRoute(subnetCidr's network, prefixLen)` (e.g. `addRoute("192.168.50.0", 24)`) to the builder. Deliberately never adds `0.0.0.0/0` — this single omission is what keeps all non-home-subnet traffic on the phone's normal default route. |
 | `HomeVpnService.handoffTunFd(pfd: ParcelFileDescriptor)` | Extracts the raw int fd (`pfd.fd`) and calls the JNI native `submitTunFd(fd)`. Keeps the `ParcelFileDescriptor` object itself alive in a service-scoped field (closing it prematurely invalidates the fd Go is using). |
@@ -135,8 +156,8 @@ reaches into another layer's responsibility.
 
 | Function | Action |
 |---|---|
-| `VpnController.startVpn(String pairingHash, String role, String presharedSecret): Future<bool>` | (a) If VPN permission not yet granted, calls the platform channel `'com.home.vpn/permission'` → `VpnPermissionActivity.requestPermission` (one-time consent + starts `HomeVpnService`, which performs `SubmitTunFd`). (b) Once the fd-submitted callback (see `VpnController._onTunReady`) confirms readiness, calls the FFI-bound `StartEngine(pairingHash, role, presharedSecret)` directly. Returns `true` if `StartEngine` returned `0`. |
-| `VpnController.stopVpn(): Future<bool>` | Calls FFI-bound `StopEngine()` directly, then platform channel `'com.home.vpn/control'` → tells `HomeVpnService` to `stopEngineAndService()` (fd cleanup only; Go side is already stopped). |
+| `VpnController.startVpn(String pairingHash, String role, String presharedSecret): Future<bool>` | Calls the platform channel `'com.home.vpn/permission'` to request VPN consent and start `HomeVpnService`, which performs `SubmitTunFd`. The current implementation does not wire a follow-up `StartEngine` call after the tun-ready callback. |
+| `VpnController.stopVpn(): Future<bool>` | Calls the FFI-bound `StopEngine()` directly and then returns. The current implementation calls `stopEngine()` from `stopService()` but does not expose a structured `platform channel` stop-control path for `HomeVpnService` cleanup. |
 | `VpnController.getStatus(): Future<VpnStatus>` | Calls FFI-bound `GetStatusJSON()`, parses it, calls `FreeCString` on the returned pointer, maps to the `VpnStatus` enum. |
 | `VpnController.vpnStatusStream: Stream<VpnStatus>` | Polls `getStatus()` on a short interval (e.g. every 2s) while the toggle is ON, or subscribes to an `EventChannel('com.home.vpn/status')` if Kotlin is also forwarding `NotifyNetworkChanged`-triggered state pushes — pick one mechanism and keep it, don't run both. |
 | `VpnController._onTunReady: Future<void> Function()` | Internal callback awaited between permission grant and calling `StartEngine`, so Flutter never calls `StartEngine` before Kotlin's `SubmitTunFd` has actually completed (avoids the race where Go's `StartEngine` fails because no fd is stored yet). |
@@ -155,16 +176,16 @@ reaches into another layer's responsibility.
 5. Flutter's `_onTunReady` resolves → `StartEngine(hash, role, secret)` (Go)
 6. Go: `refreshLocalEndpoint` → `writeEndpointToFirebase` → `listenPeerEndpoint` starts streaming
 7. Status → `WAITING_PEER` until the peer device's node appears/updates in Firebase
-8. On peer update → `punchHole` → on ack → `tunReadLoop`/`udpReadLoop` start → status → `CONNECTED`
+8. On peer update → WebRTC signaling refreshes the peer connection and opens the data channel → `tunReadLoop`/`webrtcReadLoop` start → status → `CONNECTED`
 
 ### 7.2 Local IP change (this device roams to new Wi-Fi/LTE)
 1. Android `ConnectivityManager` fires → `NetworkChangeReceiver` → `VpnBridge.notifyNetworkChanged()` → Go `NotifyNetworkChanged`
-2. Go: `refreshLocalEndpoint` (new public ip:port) → `writeEndpointToFirebase` (overwrites this device's node) — no user action, no dropped session beyond the brief re-punch
-3. Peer's `listenPeerEndpoint` stream fires on the updated node → peer re-`punchHole`s against the new address
-4. Both sides resume `tunReadLoop`/`udpReadLoop`; status briefly `RECONNECTING` → `CONNECTED`
+2. Go: `refreshLocalEndpoint` (new public ip:port) → `writeEndpointToFirebase` (overwrites this device's node) — no user action required beyond the brief reconnection
+3. Peer's `listenPeerEndpoint` stream fires on the updated node → peer refreshes WebRTC signaling and reconnects the data channel
+4. Both sides resume `tunReadLoop`/`webrtcReadLoop`; status briefly `RECONNECTING` → `CONNECTED`
 
 ### 7.3 Silent failure (NAT rebind Firebase/network-callback didn't catch)
-1. `heartbeatLoop` misses 3 acks → `handleConnectionFailure()`
+1. `heartbeatLoop` misses 3 heartbeats → `handleConnectionFailure()`
 2. Same recovery path as 7.2 steps 2–4, self-triggered instead of callback-triggered
 
 ### 7.4 Toggle OFF

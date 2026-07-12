@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Bundle
+import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 
@@ -16,8 +17,10 @@ class MainActivity : FlutterActivity() {
     private var pendingPairingHash: String? = null
     private var pendingRole: String? = null
     private var pendingSecret: String? = null
+    private var pendingPermissionResult: MethodChannel.Result? = null
 
     private val TUN_READY_ACTION = "com.shiva2232.orbitx.TUN_READY"
+    private val CONNECTION_ESTABLISHED_ACTION = "com.shiva2232.orbitx.CONNECTION_ESTABLISHED"
 
     private val tunReadyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -28,6 +31,12 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private val connectionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            showTunnelConnectedToast()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -35,18 +44,23 @@ class MainActivity : FlutterActivity() {
             MethodChannel(messenger, CHANNEL).setMethodCallHandler { call, result ->
                 when (call.method) {
                     "requestPermission" -> {
+                        if (pendingPermissionResult != null) {
+                            result.error("ALREADY_PENDING", "VPN permission request already in progress", null)
+                            return@setMethodCallHandler
+                        }
                         val args = call.arguments as? Map<String, Any>
                         pendingPairingHash = args?.get("pairingHash") as? String
                         pendingRole = args?.get("role") as? String
                         pendingSecret = args?.get("presharedSecret") as? String
+                        pendingPermissionResult = result
 
                         val prepare = VpnService.prepare(this)
                         if (prepare != null) {
                             startActivityForResult(prepare, 1002)
-                            result.success(true)
                         } else {
                             startHomeService()
-                            result.success(true)
+                            pendingPermissionResult?.success(true)
+                            pendingPermissionResult = null
                         }
                     }
                     "addAllowedApp" -> {
@@ -93,9 +107,11 @@ class MainActivity : FlutterActivity() {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // API 33+
-           registerReceiver(tunReadyReceiver, IntentFilter(TUN_READY_ACTION), Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(tunReadyReceiver, IntentFilter(TUN_READY_ACTION), Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(connectionReceiver, IntentFilter(CONNECTION_ESTABLISHED_ACTION), Context.RECEIVER_NOT_EXPORTED)
         } else {
-           registerReceiver(tunReadyReceiver, IntentFilter(TUN_READY_ACTION))
+            registerReceiver(tunReadyReceiver, IntentFilter(TUN_READY_ACTION))
+            registerReceiver(connectionReceiver, IntentFilter(CONNECTION_ESTABLISHED_ACTION))
         }
     }
 
@@ -106,12 +122,27 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             // ignore
         }
+        try {
+            unregisterReceiver(connectionReceiver)
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    private fun showTunnelConnectedToast() {
+        Toast.makeText(this, "Connected over tunnel", Toast.LENGTH_SHORT).show()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 1002 && resultCode == Activity.RESULT_OK) {
-            startHomeService()
+        if (requestCode == 1002) {
+            if (resultCode == Activity.RESULT_OK) {
+                startHomeService()
+                pendingPermissionResult?.success(true)
+            } else {
+                pendingPermissionResult?.success(false)
+            }
+            pendingPermissionResult = null
         }
     }
 

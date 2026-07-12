@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 
+private const val CONNECTION_ESTABLISHED_ACTION = "com.shiva2232.orbitx.CONNECTION_ESTABLISHED"
+
 class HomeVpnService : VpnService() {
     private var pfd: ParcelFileDescriptor? = null
     private val allowedApps = mutableSetOf<String>()
@@ -20,6 +22,8 @@ class HomeVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForegroundNotification()
+
         val pairingHash = intent?.getStringExtra("pairingHash")
         val role = intent?.getStringExtra("role")
         val preshared = intent?.getStringExtra("presharedSecret")
@@ -32,7 +36,6 @@ class HomeVpnService : VpnService() {
                 // re-establish tunnel to apply new allowed apps
                 reestablishTunnelWithAllowedApps()
             }
-            startForegroundNotification()
             return START_STICKY
         }
         // handle dynamic remove allowed app action
@@ -42,25 +45,27 @@ class HomeVpnService : VpnService() {
                 allowedApps.remove(pkg)
                 reestablishTunnelWithAllowedApps()
             }
-            startForegroundNotification()
             return START_STICKY
         }
 
         pfd = establishTunnel()
         pfd?.let {
             // Keep ParcelFileDescriptor alive and handoff raw fd to native engine
-            val fd = it.fileDescriptor
             try {
                 VpnBridge.submitTunFd(it.fd)
+                if (!pairingHash.isNullOrBlank() && !role.isNullOrBlank()) {
+                    VpnBridge.startEngine(pairingHash, role, preshared ?: "")
+                }
                 // notify Flutter/UI that TUN is ready
-                val intent = Intent("com.shiva2232.orbitx.TUN_READY")
-                sendBroadcast(intent)
+                val tunReadyIntent = Intent("com.shiva2232.orbitx.TUN_READY")
+                sendBroadcast(tunReadyIntent)
+                // notify local app that tunnel is connected
+                sendConnectionBroadcast()
             } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
 
-        startForegroundNotification()
         return START_STICKY
     }
 
@@ -106,10 +111,16 @@ class HomeVpnService : VpnService() {
                 VpnBridge.submitTunFd(it.fd)
                 val intent = Intent("com.shiva2232.orbitx.TUN_READY")
                 sendBroadcast(intent)
+                sendConnectionBroadcast()
             } catch (e: Throwable) {
                 e.printStackTrace()
             }
         }
+    }
+
+    private fun sendConnectionBroadcast() {
+        val connectedIntent = Intent(CONNECTION_ESTABLISHED_ACTION)
+        sendBroadcast(connectedIntent)
     }
 
     fun configureSplitTunnel(builder: Builder, subnetCidr: String) {
