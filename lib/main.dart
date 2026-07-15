@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
@@ -588,8 +589,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   Future<String> _ensurePairingHash() async {
+    if (kDebugMode) {
+      return 'af9aa286-d101-47b8-b799-2fa16d660e83';
+    }
     final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
     final String? value = clipboard?.text;
+    debugPrint("Clipboard: $value");
     if (value != null && UuidValidation.isValidUUID(fromString: value)) {
       return value;
     }
