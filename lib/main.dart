@@ -205,13 +205,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
                               // Visual background when swiping left (e.g., Delete)
                               secondaryBackground: Container(
-                                color: Colors.red,
+                                color: Color.from(
+                                  alpha: 0.5,
+                                  red: 0.1,
+                                  green: 0.1,
+                                  blue: 0.1,
+                                ),
                                 alignment: Alignment.centerRight,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 20.0,
                                 ),
                                 child: const Icon(
-                                  Icons.delete,
+                                  Icons.swipe_right_alt_rounded,
                                   color: Colors.white,
                                 ),
                               ),
@@ -228,17 +233,17 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                   return false;
                                 }
                                 // Allow swipe right unconditionally
-                                addOrRemoveVpn(app.packageName).then((val) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        val['result'] == true
-                                            ? '${val['isAdd'] == true ? 'Added' : 'Removed'} to VPN'
-                                            : 'Failed',
-                                      ),
-                                    ),
-                                  );
-                                });
+                                // addOrRemoveVpn(app.packageName).then((val) {
+                                //   ScaffoldMessenger.of(context).showSnackBar(
+                                //     SnackBar(
+                                //       content: Text(
+                                //         val['result'] == true
+                                //             ? '${val['isAdd'] == true ? 'Added' : 'Removed'} to VPN'
+                                //             : 'Failed',
+                                //       ),
+                                //     ),
+                                //   );
+                                // });
                                 return false;
                               },
 
