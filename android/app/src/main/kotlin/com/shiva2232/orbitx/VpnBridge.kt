@@ -12,6 +12,7 @@ object VpnBridge {
 
     external fun submitTunFd(fd: Int): Int
     external fun startEngine(pairingHash: String, role: String, presharedSecret: String): Int
+    external fun stopEngine(): Int
     external fun notifyNetworkChanged(): Int
     external fun getStatusJSON(): String?
 }

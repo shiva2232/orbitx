@@ -119,8 +119,10 @@ var (
 	stunAddr          *net.UDPAddr
 	stunServer        = "stun.l.google.com:19302"
 	stunOnce          sync.Once
-	// internal channels for simulated WebRTC/data-channel placeholders
-	peerUpdateCh = make(chan struct{}, 1)
+	peerUpdateCh      = make(chan struct{}, 1)
+	transportMu       sync.Mutex
+	transportCancel   context.CancelFunc
+	tunnelMagic       = []byte{'O', 'R', 'B', 'X', 1}
 )
 
 //export SubmitTunFd
@@ -165,6 +167,12 @@ func Java_com_shiva2232_orbitx_VpnBridge_startEngine(env *C.JNIEnv, clazz C.jcla
 	return StartEngine(cp, cr, cs)
 }
 
+//export Java_com_shiva2232_orbitx_VpnBridge_stopEngine
+func Java_com_shiva2232_orbitx_VpnBridge_stopEngine(env *C.JNIEnv, clazz C.jclass) C.jint {
+	C.SaveJavaVMAndServiceClass(env)
+	return StopEngine()
+}
+
 //export StartEngine
 func StartEngine(cpair *C.char, crole *C.char, csecret *C.char) C.int {
 	pair := C.GoString(cpair)
@@ -185,15 +193,11 @@ func StartEngine(cpair *C.char, crole *C.char, csecret *C.char) C.int {
 	status["role"] = role
 	mu.Unlock()
 
-	// kick off engine subroutines: heartbeat, peer listener, and engine loop
-	go engineLoop(ctx)
-
-	// start a heartbeat that republishes our endpoint to Firebase (discover via STUN)
 	go heartbeatLoop(ctx, pair, role)
 
 	// start listening for peer updates
 	go func() {
-		listenPeerEndpoint(pair, oppositeRole(role), nil)
+		listenPeerEndpoint(ctx, pair, oppositeRole(role), nil)
 	}()
 
 	// react to peer updates stored into status by listenPeerEndpoint
@@ -217,12 +221,29 @@ func StartEngine(cpair *C.char, crole *C.char, csecret *C.char) C.int {
 					pport = 0
 				}
 				ppriv, _ := status["peerPrivateIp"].(string)
+				privatePortVal := status["peerPrivatePort"]
+				pprivPort := pport
+				switch v := privatePortVal.(type) {
+				case int:
+					if v > 0 {
+						pprivPort = v
+					}
+				case float64:
+					if v > 0 {
+						pprivPort = int(v)
+					}
+				}
 				myPub := lastPublishedIP
 				mu.Unlock()
 
+				if pip == "" || pport <= 0 {
+					updateStatus(map[string]interface{}{"state": "WAITING_PEER"})
+					continue
+				}
+
 				// prefer private LAN if public IPs match and private candidate exists
 				if myPub != "" && pip != "" && myPub == pip && ppriv != "" {
-					bridgeWebRTC(ppriv, pport, ppriv)
+					bridgeWebRTC(ppriv, pprivPort, ppriv)
 				} else {
 					bridgeWebRTC(pip, pport, ppriv)
 				}
@@ -303,12 +324,19 @@ func protectedHTTPClient(timeout time.Duration) *http.Client {
 func writeEndpointToFirebase(hash, role, ip string, port int) error {
 	url := fmt.Sprintf("%s/pairings/%s/%s.json", firebaseDB, hash, role)
 	privateIP := getLocalPrivateIP()
+	privatePort := 0
+	if stunConn != nil {
+		if addr, ok := stunConn.LocalAddr().(*net.UDPAddr); ok {
+			privatePort = addr.Port
+		}
+	}
 	payload := map[string]interface{}{
-		"ip":        ip,
-		"port":      port,
-		"privateIp": privateIP,
-		"updatedAt": time.Now().UnixMilli(),
-		"online":    true,
+		"ip":          ip,
+		"port":        port,
+		"privateIp":   privateIP,
+		"privatePort": privatePort,
+		"updatedAt":   time.Now().UnixMilli(),
+		"online":      true,
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -452,9 +480,18 @@ func getPublicIP() (string, error) {
 
 // refreshAndPublishEndpoint obtains current public IP and publishes to Firebase only when changed.
 func refreshAndPublishEndpoint(hash, role string, port int) error {
-	ip, err := getPublicIP()
+	if hash == "" || role == "" {
+		return errors.New("missing pairing hash or role")
+	}
+	if err := initializeStunConn(); err != nil {
+		return err
+	}
+	ip, discoveredPort, err := getPublicIPPortFromStun()
 	if err != nil {
 		return err
+	}
+	if discoveredPort > 0 {
+		port = discoveredPort
 	}
 	mu.Lock()
 	if ip == lastPublishedIP && port == lastPublishedPort {
@@ -580,17 +617,23 @@ func tunWriteLoop(ctx context.Context, recv func() ([]byte, error)) {
 
 // listenPeerEndpoint creates a persistent listener (SSE-like) on the firebase path for the peer.
 // When peer data changes, onUpdate is invoked with the new ip/port if present.
-func listenPeerEndpoint(hash, peerRole string, onUpdate func(string, int)) {
+func listenPeerEndpoint(ctx context.Context, hash, peerRole string, onUpdate func(string, int)) {
 	// Firebase streaming uses the .json URL with Accept: text/event-stream
 	url := fmt.Sprintf("%s/pairings/%s/%s.json", firebaseDB, hash, peerRole)
 	for {
-		req, err := http.NewRequest(http.MethodGet, url, nil)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			time.Sleep(2 * time.Second)
 			continue
 		}
 		req.Header.Set("Accept", "text/event-stream")
-		client := &http.Client{Timeout: 0} // streaming
+		client := protectedHTTPClient(0) // streaming
 		resp, err := client.Do(req)
 		if err != nil {
 			time.Sleep(2 * time.Second)
@@ -609,8 +652,8 @@ func listenPeerEndpoint(hash, peerRole string, onUpdate func(string, int)) {
 				if data == "null" || data == "{}" {
 					continue
 				}
-				var rec map[string]interface{}
-				if err := json.Unmarshal([]byte(data), &rec); err != nil {
+				rec, err := parseFirebaseEndpointEvent([]byte(data))
+				if err != nil {
 					continue
 				}
 				ip, _ := rec["ip"].(string)
@@ -618,10 +661,14 @@ func listenPeerEndpoint(hash, peerRole string, onUpdate func(string, int)) {
 				if ip != "" && portf > 0 {
 					// also extract privateIp if present
 					priv, _ := rec["privateIp"].(string)
+					privPort := 0
+					if privPortf, ok := rec["privatePort"].(float64); ok {
+						privPort = int(privPortf)
+					}
 					// call onUpdate including private ip as part of ip string via a small convention
 					// we will instead call a variant that expects three args; update callers accordingly
 					// For backward compatibility with existing callers, use a goroutine wrapper
-					go func(ip string, port int, privateIp string) {
+					go func(ip string, port int, privateIp string, privatePort int) {
 						// attempt type assertion for new signature via reflection-like approach not available
 						// so call a typed helper via closure in StartEngine; here we just send via peerUpdateCh
 						// Store peer info in status for other goroutines to consume
@@ -629,13 +676,16 @@ func listenPeerEndpoint(hash, peerRole string, onUpdate func(string, int)) {
 						status["peerIp"] = ip
 						status["peerPort"] = port
 						status["peerPrivateIp"] = privateIp
+						if privatePort > 0 {
+							status["peerPrivatePort"] = privatePort
+						}
 						mu.Unlock()
 						// notify listener
 						select {
 						case peerUpdateCh <- struct{}{}:
 						default:
 						}
-					}(ip, int(portf), priv)
+					}(ip, int(portf), priv, privPort)
 				}
 			}
 		}
@@ -645,32 +695,141 @@ func listenPeerEndpoint(hash, peerRole string, onUpdate func(string, int)) {
 	}
 }
 
-// bridgeWebRTC is a placeholder that would perform WebRTC negotiation using Firebase signaling.
-// For now it updates the status and triggers the read/write loops stubs.
-func bridgeWebRTC(peerIP string, peerPort int, peerPrivateIP string) error {
-	setStatus(map[string]interface{}{"state": "PUNCHING"})
-	// If peerPrivateIP is supplied and public IPs match, prefer local LAN path.
-	if peerPrivateIP != "" {
-		setStatus(map[string]interface{}{"state": "CONNECTING_LOCAL", "peerIp": peerPrivateIP, "peerPort": peerPort})
-		// In a real implementation we would open a direct TCP/UDP socket to peerPrivateIP:peerPort
-		// or use WebRTC with local candidates. Here we simulate a quick success.
-		time.Sleep(200 * time.Millisecond)
-		setStatus(map[string]interface{}{"state": "CONNECTED", "peerIp": peerPrivateIP, "peerPort": peerPort, "lastHandshakeMs": time.Now().UnixMilli()})
-		return nil
+func parseFirebaseEndpointEvent(data []byte) (map[string]interface{}, error) {
+	var event map[string]interface{}
+	if err := json.Unmarshal(data, &event); err != nil {
+		return nil, err
 	}
 
-	// Placeholder for Pion WebRTC negotiation via Firebase signaling.
-	// A real implementation would:
-	// 1. Create a PeerConnection, gather local ICE candidates
-	// 2. Exchange SDP/ICE by writing/reading `/pairings/{hash}/sdp/{role}` in Firebase
-	// 3. Open a DataChannel and start read/write loops using tunReadLoop/tunWriteLoop
-	select {
-	case peerUpdateCh <- struct{}{}:
-	default:
+	if payload, ok := event["data"]; ok {
+		switch v := payload.(type) {
+		case map[string]interface{}:
+			return v, nil
+		case nil:
+			return nil, errors.New("empty firebase endpoint")
+		default:
+			return nil, errors.New("unexpected firebase endpoint payload")
+		}
 	}
-	time.Sleep(500 * time.Millisecond)
-	setStatus(map[string]interface{}{"state": "CONNECTED", "peerIp": peerIP, "peerPort": peerPort, "lastHandshakeMs": time.Now().UnixMilli()})
+
+	return event, nil
+}
+
+// bridgeWebRTC currently establishes the direct UDP-punched packet bridge that
+// WebRTC signaling will later upgrade/reuse. Firebase is used only to discover
+// the peer endpoint; TUN payloads travel directly to peerIP:peerPort.
+func bridgeWebRTC(peerIP string, peerPort int, peerPrivateIP string) error {
+	setStatus(map[string]interface{}{"state": "PUNCHING"})
+	if peerIP == "" || peerPort <= 0 {
+		return errors.New("missing peer endpoint")
+	}
+
+	if err := initializeStunConn(); err != nil {
+		updateStatus(map[string]interface{}{"state": "ERROR", "error": err.Error()})
+		return err
+	}
+
+	peerAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peerIP, peerPort))
+	if err != nil {
+		updateStatus(map[string]interface{}{"state": "ERROR", "error": err.Error()})
+		return err
+	}
+
+	transportMu.Lock()
+	if transportCancel != nil {
+		transportCancel()
+		transportCancel = nil
+	}
+	baseCtx := ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	transportCtx, cancel := context.WithCancel(baseCtx)
+	transportCancel = cancel
+	transportMu.Unlock()
+
+	if peerPrivateIP != "" && peerPrivateIP == peerIP {
+		setStatus(map[string]interface{}{"state": "CONNECTING_LOCAL", "peerIp": peerIP, "peerPort": peerPort})
+	}
+
+	go udpPeerReadLoop(transportCtx, peerAddr)
+	go tunReadLoop(transportCtx, func(framed []byte) error {
+		return sendTunnelUDP(peerAddr, 'D', framed)
+	})
+
+	for i := 0; i < 3; i++ {
+		_ = sendTunnelUDP(peerAddr, 'K', nil)
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	setStatus(map[string]interface{}{"state": "PUNCHING", "peerIp": peerIP, "peerPort": peerPort, "transport": "udp-hole-punch"})
 	return nil
+}
+
+func sendTunnelUDP(peer *net.UDPAddr, typ byte, payload []byte) error {
+	if stunConn == nil {
+		return errors.New("udp socket is not initialized")
+	}
+	out := make([]byte, 0, len(tunnelMagic)+1+len(payload))
+	out = append(out, tunnelMagic...)
+	out = append(out, typ)
+	out = append(out, payload...)
+	_, err := stunConn.WriteToUDP(out, peer)
+	return err
+}
+
+func udpPeerReadLoop(ctx context.Context, expectedPeer *net.UDPAddr) {
+	if stunConn == nil {
+		return
+	}
+	buf := make([]byte, 65535)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		_ = stunConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		n, addr, err := stunConn.ReadFromUDP(buf)
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			continue
+		}
+		if !sameUDPAddr(addr, expectedPeer) || !isTunnelPayload(buf[:n]) {
+			continue
+		}
+
+		typ := buf[len(tunnelMagic)]
+		payload := buf[len(tunnelMagic)+1 : n]
+		switch typ {
+		case 'K':
+			setStatus(map[string]interface{}{"state": "CONNECTED", "peerIp": addr.IP.String(), "peerPort": addr.Port, "lastHandshakeMs": time.Now().UnixMilli(), "transport": "udp-hole-punch"})
+		case 'D':
+			pkt, err := decodeTunnelPayload(bytes.NewReader(payload))
+			if err != nil || tunFile == nil {
+				continue
+			}
+			_, _ = tunFile.Write(pkt)
+			setStatus(map[string]interface{}{"state": "CONNECTED", "peerIp": addr.IP.String(), "peerPort": addr.Port, "lastHandshakeMs": time.Now().UnixMilli(), "transport": "udp-hole-punch"})
+		}
+	}
+}
+
+func isTunnelPayload(pkt []byte) bool {
+	if len(pkt) < len(tunnelMagic)+1 {
+		return false
+	}
+	return bytes.Equal(pkt[:len(tunnelMagic)], tunnelMagic)
+}
+
+func sameUDPAddr(a, b *net.UDPAddr) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.IP.Equal(b.IP) && a.Port == b.Port
 }
 
 // heartbeatLoop periodically republishes our endpoint to Firebase to keep NAT bindings alive.
@@ -691,6 +850,11 @@ func heartbeatLoop(ctx context.Context, hash, role string) {
 		port = 0
 	}
 	_ = writeEndpointToFirebase(hash, role, ip, port)
+	mu.Lock()
+	lastPublishedIP = ip
+	lastPublishedPort = port
+	mu.Unlock()
+	updateStatus(map[string]interface{}{"state": "WAITING_PEER", "localIp": ip, "localPort": port})
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -699,12 +863,26 @@ func heartbeatLoop(ctx context.Context, hash, role string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ip, port, err := getPublicIPPortFromStun()
-			if err != nil {
-				ip, _ = getPublicIP()
-				port = 0
+			mu.Lock()
+			ip = lastPublishedIP
+			port = lastPublishedPort
+			pip, _ := status["peerIp"].(string)
+			pport, _ := status["peerPort"].(int)
+			if pport == 0 {
+				if pf, ok := status["peerPort"].(float64); ok {
+					pport = int(pf)
+				}
 			}
-			_ = writeEndpointToFirebase(hash, role, ip, port)
+			mu.Unlock()
+
+			if ip != "" && port > 0 {
+				_ = writeEndpointToFirebase(hash, role, ip, port)
+			}
+			if pip != "" && pport > 0 {
+				if peerAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", pip, pport)); err == nil {
+					_ = sendTunnelUDP(peerAddr, 'K', nil)
+				}
+			}
 		}
 	}
 }
@@ -741,6 +919,25 @@ func updateStatus(m map[string]interface{}) {
 	}
 }
 
+func stopTransport() {
+	transportMu.Lock()
+	if transportCancel != nil {
+		transportCancel()
+		transportCancel = nil
+	}
+	transportMu.Unlock()
+}
+
+func resetUDPDiscoverySocket() {
+	stopTransport()
+	if stunConn != nil {
+		_ = stunConn.Close()
+		stunConn = nil
+		stunAddr = nil
+		stunOnce = sync.Once{}
+	}
+}
+
 //export StopEngine
 func StopEngine() C.int {
 	mu.Lock()
@@ -748,12 +945,7 @@ func StopEngine() C.int {
 		cancelFn()
 		cancelFn = nil
 	}
-	if stunConn != nil {
-		_ = stunConn.Close()
-		stunConn = nil
-		stunAddr = nil
-		stunOnce = sync.Once{}
-	}
+	resetUDPDiscoverySocket()
 	status = map[string]interface{}{"state": "DISCONNECTED"}
 	mu.Unlock()
 	return 0
@@ -768,10 +960,13 @@ func NotifyNetworkChanged() C.int {
 	mu.Unlock()
 	updateStatus(map[string]interface{}{"state": "RECONNECTING"})
 	go func() {
+		mu.Lock()
+		resetUDPDiscoverySocket()
+		mu.Unlock()
 		// attempt to refresh and publish our endpoint
 		_ = refreshAndPublishEndpoint(pair, role, 0)
 		time.Sleep(500 * time.Millisecond)
-		updateStatus(map[string]interface{}{"state": "CONNECTED", "lastHandshakeMs": time.Now().UnixMilli()})
+		updateStatus(map[string]interface{}{"state": "WAITING_PEER", "lastHandshakeMs": time.Now().UnixMilli()})
 	}()
 	return 0
 }

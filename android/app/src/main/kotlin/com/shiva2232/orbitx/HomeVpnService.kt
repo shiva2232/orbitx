@@ -24,7 +24,7 @@ class HomeVpnService : VpnService() {
 
         @JvmStatic
         fun protectSocketFromNative(fd: Int): Boolean {
-            return true; // activeService?.get()?.protect(fd) ?: false
+            return activeService?.get()?.protect(fd) ?: false
         }
     }
 
@@ -225,13 +225,18 @@ class HomeVpnService : VpnService() {
 
     fun stopEngineAndService() {
         try {
-            VpnBridge.notifyNetworkChanged() // best-effort
+            VpnBridge.stopEngine()
         } catch (e: Throwable) {
             e.printStackTrace()
         }
         pfd?.close()
         stopForeground(true)
         stopSelf()
+    }
+
+    override fun onRevoke() {
+        stopEngineAndService()
+        super.onRevoke()
     }
 
     private fun startForegroundNotification() {
