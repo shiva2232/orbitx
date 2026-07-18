@@ -42,6 +42,17 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    // NOTE: added below
+
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-database")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+
+    implementation("com.wireguard.android:tunnel:1.0.20230706")
 }
 
 kotlin {
