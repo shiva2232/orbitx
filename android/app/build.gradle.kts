@@ -53,6 +53,7 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 
     implementation("com.wireguard.android:tunnel:1.0.20230706")
+    implementation(files("lib/firewg-p2p.aar"))
 }
 
 kotlin {

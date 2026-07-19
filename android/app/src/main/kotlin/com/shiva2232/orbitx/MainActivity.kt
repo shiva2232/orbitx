@@ -14,14 +14,13 @@ import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import go.Seq
+import p2p.P2p
 
 class MainActivity : FlutterActivity() {
     private val scope = MainScope()
     private lateinit var methodChannel: MethodChannel
     private var pendingPermissionResult: MethodChannel.Result? = null
-    
-    // Move KeyUtils to a member variable to prevent garbage collection
-    private lateinit var keyUtils: KeyUtils
 
     private val tunReadyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -43,6 +42,9 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Seq.setContext(this);
+        P2p.init(true);
+
 
         val filter1 = IntentFilter(TUN_READY_ACTION)
         val filter2 = IntentFilter(CONNECTION_ESTABLISHED_ACTION)
