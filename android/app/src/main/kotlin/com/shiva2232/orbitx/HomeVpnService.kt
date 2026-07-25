@@ -1,45 +1,56 @@
 package com.shiva2232.orbitx
 
-
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.VpnService
-import com.wireguard.android.backend.Backend
-import com.wireguard.android.backend.GoBackend
-import com.wireguard.android.backend.Tunnel
-import com.wireguard.config.Config
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import android.util.Log
+import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-
-private const val CONNECTION_ESTABLISHED_ACTION = "com.shiva2232.orbitx.CONNECTION_ESTABLISHED"
-private const val TUN_READY_ACTION = "com.shiva2232.orbitx.TUN_READY"
+private const val CHANNEL_ID = "vpn_channel"
+private const val NOTIFICATION_ID = 1
+private const val TAG = "HomeVpnService"
 
 class HomeVpnService : VpnService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
-    private lateinit var backend: Backend
-
-    // Define a concrete Tunnel object
-    private val myTunnel = object : Tunnel {
-        override fun getName(): String = "WireGuardTunnel"
-        override fun onStateChange(state: Tunnel.State) {
-            // Handle connection state changes here (e.g. UP, DOWN)
-        }
-    }
+    private var tunFd: ParcelFileDescriptor? = null
 
     override fun onCreate() {
         super.onCreate()
-        // Instantiate the official userspace WireGuard backend
-        backend = GoBackend(applicationContext)
+        instance = this
+        createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("OrbitX VPN")
+            .setContentText("VPN service is active")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+
+        val action = intent?.action
         if (action == "START_VPN") {
-            val configText = intent.getStringExtra("CONFIG_TEXT") ?: ""
-            startTunnel(configText)
+            val uuid = intent.getStringExtra("pairingHash") ?: ""
+            val role = intent.getStringExtra("role") ?: ""
+            val secret = intent.getStringExtra("presharedSecret") ?: ""
+            
+            Log.d(TAG, "START_VPN action received: uuid=$uuid, role=$role")
+            startTunnel(uuid, role, secret)
         } else if (action == "STOP_VPN") {
             stopTunnel()
         }
@@ -47,16 +58,47 @@ class HomeVpnService : VpnService() {
         return START_NOT_STICKY
     }
 
-    private fun startTunnel(configText: String) {
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val serviceChannel = NotificationChannel(
+                CHANNEL_ID,
+                "VPN Service Channel",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(serviceChannel)
+        }
+    }
+
+    private fun startTunnel(uuid: String, role: String, secret: String) {
         serviceScope.launch {
             try {
-                // Parse configuration string directly into the official Config object
-                val config = Config.parse(configText.byteInputStream())
+                // 1. Establish TUN interface
+                val builder = Builder()
+                    .setSession("OrbitX")
+                    .setMtu(1420)
+                    .addAddress("10.0.0.2", 32)
+                    .addRoute("0.0.0.0", 0)
 
-                // Bring the tunnel interface UP
-                backend.setState(myTunnel, Tunnel.State.UP, config)
+                val pfd = builder.establish() ?: error("VPN establish() failed")
+                tunFd = pfd
+
+                // 2. Submit FD to native engine via VpnBridge
+                val fd = pfd.fd
+                Log.i(TAG, "Submitting FD $fd to VpnBridge")
+                
+                // Wrap native calls in Throwable catch to prevent process termination on JNI error
+                try {
+                    VpnBridge.submitTunFd(fd)
+                    VpnBridge.startEngine(uuid, role, secret)
+                    Log.i(TAG, "VpnBridge engine started successfully")
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Native VpnBridge call failed", t)
+                    stopSelf()
+                }
+
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "Failed to start tunnel", e)
                 stopSelf()
             }
         }
@@ -65,10 +107,12 @@ class HomeVpnService : VpnService() {
     private fun stopTunnel() {
         serviceScope.launch {
             try {
-                // Safely take down the tunnel
-                backend.setState(myTunnel, Tunnel.State.DOWN, null)
-            } catch (e: Exception) {
-                e.printStackTrace()
+                VpnBridge.stopEngine()
+                tunFd?.close()
+                tunFd = null
+                Log.i(TAG, "VPN stopped")
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error stopping native engine", t)
             } finally {
                 stopSelf()
             }
@@ -76,7 +120,23 @@ class HomeVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        instance = null
         super.onDestroy()
         stopTunnel()
+    }
+
+    companion object {
+        private var instance: HomeVpnService? = null
+
+        /**
+         * This method is called by the Go native code (vpnengine.go) 
+         * via ProtectSocketFdC to exclude its own traffic from the tunnel.
+         */
+        @JvmStatic
+        fun protectSocketFromNative(fd: Int): Boolean {
+            val res = instance?.protect(fd) ?: false
+            if (!res) Log.w(TAG, "Socket protection failed for fd: $fd")
+            return res
+        }
     }
 }

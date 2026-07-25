@@ -7,20 +7,22 @@ import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 import go.Seq
-import p2p.P2p
 
 class MainActivity : FlutterActivity() {
     private val scope = MainScope()
     private lateinit var methodChannel: MethodChannel
     private var pendingPermissionResult: MethodChannel.Result? = null
+    
+    // Store VPN arguments in a member variable to avoid losing them
+    private var pendingVpnArgs: Map<*, *>? = null
 
     private val tunReadyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -42,16 +44,18 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Seq.setContext(this);
-        P2p.init(true);
-
+        try {
+            Seq.setContext(this)
+        } catch (e: Exception) {
+            Log.w("TAG", "Gomobile Seq context not initialized")
+        }
 
         val filter1 = IntentFilter(TUN_READY_ACTION)
         val filter2 = IntentFilter(CONNECTION_ESTABLISHED_ACTION)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(tunReadyReceiver, filter1, Context.RECEIVER_NOT_EXPORTED)
-            registerReceiver(connectionReceiver, filter2, Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(tunReadyReceiver, filter1, RECEIVER_NOT_EXPORTED)
+            registerReceiver(connectionReceiver, filter2, RECEIVER_NOT_EXPORTED)
         } else {
             registerReceiver(tunReadyReceiver, filter1)
             registerReceiver(connectionReceiver, filter2)
@@ -68,14 +72,15 @@ class MainActivity : FlutterActivity() {
                         result.error("ALREADY_PENDING", "VPN permission request already in progress", null)
                         return@setMethodCallHandler
                     }
-                    pendingPermissionResult = result
+                    
                     val prepare = VpnService.prepare(this)
                     if (prepare != null) {
+                        pendingPermissionResult = result
+                        pendingVpnArgs = call.arguments as? Map<*, *>
                         startActivityForResult(prepare, 1002)
                     } else {
                         startHomeService(call.arguments as? Map<*, *>)
-                        pendingPermissionResult?.success(true)
-                        pendingPermissionResult = null
+                        result.success(true)
                     }
                 }
                 "stopService" -> {
@@ -102,18 +107,22 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 1002) {
             if (resultCode == RESULT_OK) {
+                startHomeService(pendingVpnArgs)
                 pendingPermissionResult?.success(true)
             } else {
                 pendingPermissionResult?.success(false)
             }
             pendingPermissionResult = null
+            pendingVpnArgs = null
         }
     }
 
     private fun startHomeService(args: Map<*, *>?) {
         val intent = Intent(this, HomeVpnService::class.java).apply {
+            action = "START_VPN"
             putExtra("pairingHash", args?.get("pairingHash") as? String)
             putExtra("role", args?.get("role") as? String)
+            putExtra("deviceName", args?.get("deviceName") as? String)
             putExtra("presharedSecret", args?.get("presharedSecret") as? String)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

@@ -33,6 +33,11 @@ migrate_working_dir/
 /build/
 /coverage/
 
+
+# native packages
+*.jar
+*.aar
+
 # Symbolication related
 app.*.symbols
 
