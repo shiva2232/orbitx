@@ -1,4 +1,5 @@
 # ===== CONFIG =====
+$ErrorActionPreference = "Stop"
 $NDK = "C:\Users\vsiva\AppData\Local\Android\Sdk\ndk\28.2.13676358"
 $API = "23"
 $BASE_TOOLCHAIN = "$NDK\toolchains\llvm\prebuilt\windows-x86_64\bin"
@@ -16,7 +17,7 @@ function Build-Arch($arch, $target, $folder) {
     # Use verbose output to help diagnose cross-compile issues.
     go build -v -buildmode=c-shared -o libvpnengine.so .
     
-    $dest = "./$folder"
+    $dest = "../android/app/src/main/jniLibs/$folder"
     if (!(Test-Path $dest)) { New-Item -ItemType Directory -Force $dest }
     Move-Item libvpnengine.so "$dest/libvpnengine.so" -Force
     # Clean up the generated header

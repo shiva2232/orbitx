@@ -13,6 +13,12 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.MainScope
+
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+
 import kotlinx.coroutines.cancel
 import go.Seq
 
@@ -42,8 +48,16 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // use sim only
+    private lateinit var connectivityManager: ConnectivityManager
+    private var cellularNetworkCallback: ConnectivityManager.NetworkCallback? = null
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        forceCellularNetwork()
         try {
             Seq.setContext(this)
         } catch (e: Exception) {
@@ -61,6 +75,51 @@ class MainActivity : FlutterActivity() {
             registerReceiver(connectionReceiver, filter2)
         }
     }
+
+
+    private fun forceCellularNetwork() {
+        // 1. Build a request specifically for Cellular/Mobile data
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        // 2. Define the callback to handle the network once found
+        cellularNetworkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                super.onAvailable(network)
+                Log.d("NetworkManager", "Cellular network is available.")
+
+                // 3. Bind the application process to this cellular network
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val result = connectivityManager.bindProcessToNetwork(network)
+                    Log.d("NetworkManager", "Process bound to Cellular: $result")
+                } else {
+                    // Fallback for older API versions (deprecated in API 23)
+                    @Suppress("DEPRECATION")
+                    ConnectivityManager.setProcessDefaultNetwork(network)
+                }
+            }
+
+            override fun onLost(network: Network) {
+                super.onLost(network)
+                Log.d("NetworkManager", "Cellular network lost.")
+                // Unbind if cellular goes away, reverting to system default (Wi-Fi)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    connectivityManager.bindProcessToNetwork(null)
+                } else {
+                    @Suppress("DEPRECATION")
+                    ConnectivityManager.setProcessDefaultNetwork(null)
+                }
+            }
+        }
+
+        // 4. Request the network from the system
+        cellularNetworkCallback?.let { callback ->
+            connectivityManager.requestNetwork(request, callback)
+        }
+    }
+
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -94,6 +153,9 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        cellularNetworkCallback?.let { callback ->
+            connectivityManager.unregisterNetworkCallback(callback)
+        }
         scope.cancel()
         try { unregisterReceiver(tunReadyReceiver) } catch (e: Exception) {}
         try { unregisterReceiver(connectionReceiver) } catch (e: Exception) {}

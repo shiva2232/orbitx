@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
@@ -13,6 +14,8 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 private const val CHANNEL_ID = "vpn_channel"
 private const val NOTIFICATION_ID = 1
@@ -22,11 +25,14 @@ class HomeVpnService : VpnService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
     private var tunFd: ParcelFileDescriptor? = null
+    private val networkCallback = NetworkChangeReceiver()
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannel()
+        (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
+            .registerDefaultNetworkCallback(networkCallback)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -77,14 +83,15 @@ class HomeVpnService : VpnService() {
                 // Master: 10.0.0.1, Slave: 10.0.0.2
                 val isMaster = role.equals("master", ignoreCase = true) || role.equals("host", ignoreCase = true)
                 val internalIp = if (isMaster) "10.0.0.1" else "10.0.0.2"
+                val internalGateway = if (isMaster) "10.0.0.2" else "10.0.0.1"
                 val normalizedRole = if (isMaster) "master" else "slave"
 
                 // 1. Establish TUN interface
                 val builder = Builder()
                     .setSession("OrbitX")
                     .setMtu(1420)
-                    .addAddress(internalIp, 32)
-                    .addRoute("0.0.0.0", 0)
+                    .addAddress(internalIp, 30)
+                    .addRoute(internalGateway, 32)
                     // Ensure the app's own traffic (signaling) bypasses the VPN tunnel
                     // to prevent routing loops and ensure connectivity to Firebase/STUN.
                     .addDisallowedApplication(packageName)
@@ -101,6 +108,8 @@ class HomeVpnService : VpnService() {
                     // Start native engine
                     VpnBridge.submitTunFd(fd)
                     VpnBridge.startEngine(uuid, normalizedRole, secret)
+                    sendBroadcast(Intent("com.shiva2232.orbitx.TUN_READY").setPackage(packageName))
+                    observeEngineStatus()
                     Log.i(TAG, "VpnBridge engine started successfully as $normalizedRole")
                 } catch (t: Throwable) {
                     Log.e(TAG, "Native VpnBridge call failed", t)
@@ -110,6 +119,28 @@ class HomeVpnService : VpnService() {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start tunnel", e)
                 stopSelf()
+            }
+        }
+    }
+
+    private fun observeEngineStatus() {
+        serviceScope.launch {
+            var lastEndpoint = ""
+            while (isActive && tunFd != null) {
+                val status = try { VpnBridge.getStatusJSON().orEmpty() } catch (_: Throwable) { "" }
+                if (status.contains("\"state\":\"CONNECTED\"")) {
+                    val endpoint = status.substringAfter("\"peerIp\":\"").substringBefore('"') + ":" +
+                        status.substringAfter("\"peerPort\":").takeWhile { it.isDigit() }
+                    if (endpoint != ":" && endpoint != lastEndpoint) {
+                        lastEndpoint = endpoint
+                        val parts = endpoint.split(":")
+                        sendBroadcast(Intent("com.shiva2232.orbitx.CONNECTION_ESTABLISHED")
+                            .setPackage(packageName)
+                            .putExtra("peerIp", parts.first())
+                            .putExtra("peerPort", parts.last().toIntOrNull() ?: 0))
+                    }
+                }
+                delay(1000)
             }
         }
     }
@@ -131,6 +162,10 @@ class HomeVpnService : VpnService() {
 
     override fun onDestroy() {
         instance = null
+        try {
+            (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
+                .unregisterNetworkCallback(networkCallback)
+        } catch (_: Throwable) { }
         super.onDestroy()
         stopTunnel()
     }
