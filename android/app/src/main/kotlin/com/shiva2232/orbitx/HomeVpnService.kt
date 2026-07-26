@@ -73,25 +73,35 @@ class HomeVpnService : VpnService() {
     private fun startTunnel(uuid: String, role: String, secret: String) {
         serviceScope.launch {
             try {
+                // Determine internal IP and normalize role for consistent signaling
+                // Master: 10.0.0.1, Slave: 10.0.0.2
+                val isMaster = role.equals("master", ignoreCase = true) || role.equals("host", ignoreCase = true)
+                val internalIp = if (isMaster) "10.0.0.1" else "10.0.0.2"
+                val normalizedRole = if (isMaster) "master" else "slave"
+
                 // 1. Establish TUN interface
                 val builder = Builder()
                     .setSession("OrbitX")
                     .setMtu(1420)
-                    .addAddress("10.0.0.2", 32)
+                    .addAddress(internalIp, 32)
                     .addRoute("0.0.0.0", 0)
+                    // Ensure the app's own traffic (signaling) bypasses the VPN tunnel
+                    // to prevent routing loops and ensure connectivity to Firebase/STUN.
+                    .addDisallowedApplication(packageName)
 
                 val pfd = builder.establish() ?: error("VPN establish() failed")
-                tunFd = pfd
-
-                // 2. Submit FD to native engine via VpnBridge
-                val fd = pfd.fd
-                Log.i(TAG, "Submitting FD $fd to VpnBridge")
                 
-                // Wrap native calls in Throwable catch to prevent process termination on JNI error
+                // Detach FD to transfer ownership to native code and prevent closure by GC.
+                val fd = pfd.detachFd()
+                tunFd = ParcelFileDescriptor.adoptFd(fd)
+
+                Log.i(TAG, "Tunnel established with IP $internalIp. Submitting FD $fd to VpnBridge")
+                
                 try {
+                    // Start native engine
                     VpnBridge.submitTunFd(fd)
-                    VpnBridge.startEngine(uuid, role, secret)
-                    Log.i(TAG, "VpnBridge engine started successfully")
+                    VpnBridge.startEngine(uuid, normalizedRole, secret)
+                    Log.i(TAG, "VpnBridge engine started successfully as $normalizedRole")
                 } catch (t: Throwable) {
                     Log.e(TAG, "Native VpnBridge call failed", t)
                     stopSelf()
@@ -129,13 +139,13 @@ class HomeVpnService : VpnService() {
         private var instance: HomeVpnService? = null
 
         /**
-         * This method is called by the Go native code (vpnengine.go) 
-         * via ProtectSocketFdC to exclude its own traffic from the tunnel.
+         * This method is called by the Go native code via JNI 
+         * to exclude signaling traffic from the VPN tunnel.
          */
         @JvmStatic
         fun protectSocketFromNative(fd: Int): Boolean {
             val res = instance?.protect(fd) ?: false
-            if (!res) Log.w(TAG, "Socket protection failed for fd: $fd")
+            if (!res) Log.w(TAG, "Socket protection failed for fd: $fd (Service instance null? ${instance == null})")
             return res
         }
     }
