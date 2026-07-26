@@ -57,7 +57,7 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
 
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        forceCellularNetwork()
+        // forceCellularNetwork()
         try {
             Seq.setContext(this)
         } catch (e: Exception) {

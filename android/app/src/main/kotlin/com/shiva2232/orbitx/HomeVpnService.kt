@@ -82,8 +82,8 @@ class HomeVpnService : VpnService() {
                 // Determine internal IP and normalize role for consistent signaling
                 // Master: 10.0.0.1, Slave: 10.0.0.2
                 val isMaster = role.equals("master", ignoreCase = true) || role.equals("host", ignoreCase = true)
-                val internalIp = if (isMaster) "10.0.0.1" else "10.0.0.2"
-                val internalGateway = if (isMaster) "10.0.0.2" else "10.0.0.1"
+                val internalIp = if (isMaster) "100.64.0.1" else "100.64.0.2"
+                val internalGateway = if (isMaster) "100.64.0.2" else "100.64.0.1"
                 val normalizedRole = if (isMaster) "master" else "slave"
 
                 // 1. Establish TUN interface
