@@ -79,26 +79,28 @@ class HomeVpnService : VpnService() {
     private fun startTunnel(uuid: String, role: String, secret: String) {
         serviceScope.launch {
             try {
-                // Determine internal IP and normalize role for consistent signaling
+                // ALIGNMENT: Match the 10.0.0.x range used by the native Go engine.
                 // Master: 10.0.0.1, Slave: 10.0.0.2
                 val isMaster = role.equals("master", ignoreCase = true) || role.equals("host", ignoreCase = true)
-                val internalIp = if (isMaster) "100.64.0.1" else "100.64.0.2"
-                val internalGateway = if (isMaster) "100.64.0.2" else "100.64.0.1"
+                val internalIp = if (isMaster) "10.0.0.1" else "10.0.0.2"
                 val normalizedRole = if (isMaster) "master" else "slave"
 
                 // 1. Establish TUN interface
                 val builder = Builder()
                     .setSession("OrbitX")
-                    .setMtu(1420)
-                    .addAddress(internalIp, 30)
-                    .addRoute(internalGateway, 32)
+                    // Lower MTU to 1280 ensures service data (HTTP/SQL) packets fit through 
+                    // mobile carrier networks without being dropped or fragmented.
+                    .setMtu(1280)
+                    .addAddress(internalIp, 24)
+                    // Route the entire virtual subnet (10.0.0.0/24) to the tunnel
+                    .addRoute("10.0.0.0", 24)
                     // Ensure the app's own traffic (signaling) bypasses the VPN tunnel
                     // to prevent routing loops and ensure connectivity to Firebase/STUN.
                     .addDisallowedApplication(packageName)
 
                 val pfd = builder.establish() ?: error("VPN establish() failed")
                 
-                // Detach FD to transfer ownership to native code and prevent closure by GC.
+                // Detach FD to transfer ownership to native Go code.
                 val fd = pfd.detachFd()
                 tunFd = ParcelFileDescriptor.adoptFd(fd)
 
