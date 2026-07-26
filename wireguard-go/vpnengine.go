@@ -87,7 +87,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -199,8 +198,11 @@ func StartEngine(cpair *C.char, crole *C.char, csecret *C.char) C.int {
 	ctx, cancelFn = context.WithCancel(context.Background())
 	mu.Unlock()
 
-	file := os.NewFile(uintptr(tunFd), "tun")
-	tunDev, err := tun.CreateTUNFromFile(file, 1420)
+	// Android's VpnService has already created and configured this TUN file
+	// descriptor. CreateTUNFromFile starts a NETLINK_ROUTE monitor, which an
+	// unprivileged Android app is not allowed to bind, preventing the engine
+	// from ever reaching its Firebase bootstrap publish.
+	tunDev, _, err := tun.CreateUnmonitoredTUNFromFD(tunFd)
 	if err != nil {
 		log.Printf("[vpnengine] CreateTUN failed: %v", err)
 		return -3
