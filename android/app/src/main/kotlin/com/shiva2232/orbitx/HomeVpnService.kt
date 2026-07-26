@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -24,15 +25,22 @@ private const val TAG = "HomeVpnService"
 class HomeVpnService : VpnService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.IO)
-    private var tunFd: ParcelFileDescriptor? = null
+    private var tunnelJob: Job? = null
+    private var statusJob: Job? = null
+    private var activeTunFd: Int = -1
     private val networkCallback = NetworkChangeReceiver()
 
     override fun onCreate() {
         super.onCreate()
+        Log.d(TAG, "onCreate")
         instance = this
         createNotificationChannel()
-        (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
-            .registerDefaultNetworkCallback(networkCallback)
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.registerDefaultNetworkCallback(networkCallback)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to register network callback", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -50,15 +58,23 @@ class HomeVpnService : VpnService() {
         }
 
         val action = intent?.action
+        Log.d(TAG, "onStartCommand: action=$action")
+
         if (action == "START_VPN") {
             val uuid = intent.getStringExtra("pairingHash") ?: ""
             val role = intent.getStringExtra("role") ?: ""
             val secret = intent.getStringExtra("presharedSecret") ?: ""
             
-            Log.d(TAG, "START_VPN action received: uuid=$uuid, role=$role")
-            startTunnel(uuid, role, secret)
+            // Cancel any pending startup or status observation from a previous session
+            tunnelJob?.cancel()
+            statusJob?.cancel()
+            
+            tunnelJob = serviceScope.launch {
+                startTunnel(uuid, role, secret)
+            }
         } else if (action == "STOP_VPN") {
-            stopTunnel()
+            cleanupResources()
+            stopSelf()
         }
 
         return START_NOT_STICKY
@@ -76,113 +92,134 @@ class HomeVpnService : VpnService() {
         }
     }
 
-    private fun startTunnel(uuid: String, role: String, secret: String) {
-        serviceScope.launch {
+    private suspend fun startTunnel(uuid: String, role: String, secret: String) {
+        try {
+            // Clean up native resources before re-starting to prevent conflicts
+            cleanupNativeOnly()
+
+            // Determine internal IP and normalize role
+            val isMaster = role.equals("master", ignoreCase = true) || role.equals("host", ignoreCase = true)
+            val internalIp = if (isMaster) "10.0.0.1" else "10.0.0.2"
+            val normalizedRole = if (isMaster) "master" else "slave"
+
+            Log.i(TAG, "Starting tunnel with IP $internalIp as $normalizedRole")
+
+            // 1. Establish TUN interface
+            val builder = Builder()
+                .setSession("OrbitX")
+                .setMtu(1280)
+                .addAddress(internalIp, 24)
+                .addRoute("10.0.0.0", 24)
+                .addDnsServer("1.1.1.1")
+                .addDisallowedApplication(packageName)
+
+            val pfd = builder.establish() ?: error("VPN establish() failed")
+            
+            // 2. Transfer ownership to native code. 
+            // detachedFd MUST be closed by the receiver (Go engine).
+            // We do NOT adopt it back into a ParcelFileDescriptor here to avoid fdsan double-ownership crashes.
+            val fd = pfd.detachFd()
+            activeTunFd = fd
+
+            Log.i(TAG, "TUN FD detached: $fd. Submitting to VpnBridge...")
+            
             try {
-                // ALIGNMENT: Match the 10.0.0.x range used by the native Go engine.
-                // Master: 10.0.0.1, Slave: 10.0.0.2
-                val isMaster = role.equals("master", ignoreCase = true) || role.equals("host", ignoreCase = true)
-                val internalIp = if (isMaster) "10.0.0.1" else "10.0.0.2"
-                val normalizedRole = if (isMaster) "master" else "slave"
-
-                // 1. Establish TUN interface
-                val builder = Builder()
-                    .setSession("OrbitX")
-                    // Lower MTU to 1280 ensures service data (HTTP/SQL) packets fit through 
-                    // mobile carrier networks without being dropped or fragmented.
-                    .setMtu(1280)
-                    .addAddress(internalIp, 24)
-                    // Route the entire virtual subnet (10.0.0.0/24) to the tunnel
-                    .addRoute("10.0.0.0", 24)
-                    // Ensure the app's own traffic (signaling) bypasses the VPN tunnel
-                    // to prevent routing loops and ensure connectivity to Firebase/STUN.
-                    .addDisallowedApplication(packageName)
-
-                val pfd = builder.establish() ?: error("VPN establish() failed")
+                // Initialize JNI references and submit FD
+                VpnBridge.submitTunFd(fd)
+                // Start the engine
+                VpnBridge.startEngine(uuid, normalizedRole, secret)
                 
-                // Detach FD to transfer ownership to native Go code.
-                val fd = pfd.detachFd()
-                tunFd = ParcelFileDescriptor.adoptFd(fd)
-
-                Log.i(TAG, "Tunnel established with IP $internalIp. Submitting FD $fd to VpnBridge")
-                
-                try {
-                    // Start native engine
-                    VpnBridge.submitTunFd(fd)
-                    VpnBridge.startEngine(uuid, normalizedRole, secret)
-                    sendBroadcast(Intent("com.shiva2232.orbitx.TUN_READY").setPackage(packageName))
-                    observeEngineStatus()
-                    Log.i(TAG, "VpnBridge engine started successfully as $normalizedRole")
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Native VpnBridge call failed", t)
-                    stopSelf()
-                }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start tunnel", e)
+                sendBroadcast(Intent("com.shiva2232.orbitx.TUN_READY").setPackage(packageName))
+                observeEngineStatus()
+                Log.i(TAG, "Native engine started successfully")
+            } catch (t: Throwable) {
+                Log.e(TAG, "Native engine startup failed", t)
+                // If native side failed to take ownership, close it now manually to avoid leak
+                closeRawFd(fd)
+                cleanupResources()
                 stopSelf()
             }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Critical failure during tunnel establishment", e)
+            cleanupResources()
+            stopSelf()
         }
     }
 
     private fun observeEngineStatus() {
-        serviceScope.launch {
+        statusJob?.cancel()
+        statusJob = serviceScope.launch {
             var lastEndpoint = ""
-            while (isActive && tunFd != null) {
-                val status = try { VpnBridge.getStatusJSON().orEmpty() } catch (_: Throwable) { "" }
-                if (status.contains("\"state\":\"CONNECTED\"")) {
-                    val endpoint = status.substringAfter("\"peerIp\":\"").substringBefore('"') + ":" +
-                        status.substringAfter("\"peerPort\":").takeWhile { it.isDigit() }
-                    if (endpoint != ":" && endpoint != lastEndpoint) {
-                        lastEndpoint = endpoint
-                        val parts = endpoint.split(":")
-                        sendBroadcast(Intent("com.shiva2232.orbitx.CONNECTION_ESTABLISHED")
-                            .setPackage(packageName)
-                            .putExtra("peerIp", parts.first())
-                            .putExtra("peerPort", parts.last().toIntOrNull() ?: 0))
+            while (isActive && activeTunFd != -1) {
+                try {
+                    val status = VpnBridge.getStatusJSON().orEmpty()
+                    if (status.contains("\"state\":\"CONNECTED\"")) {
+                        val endpoint = status.substringAfter("\"peerIp\":\"").substringBefore('"') + ":" +
+                            status.substringAfter("\"peerPort\":").takeWhile { it.isDigit() }
+                        if (endpoint != ":" && endpoint != lastEndpoint) {
+                            lastEndpoint = endpoint
+                            val parts = endpoint.split(":")
+                            sendBroadcast(Intent("com.shiva2232.orbitx.CONNECTION_ESTABLISHED")
+                                .setPackage(packageName)
+                                .putExtra("peerIp", parts.first())
+                                .putExtra("peerPort", parts.last().toIntOrNull() ?: 0))
+                        }
                     }
-                }
+                } catch (e: Throwable) {}
                 delay(1000)
             }
         }
     }
 
-    private fun stopTunnel() {
-        serviceScope.launch {
+    private fun cleanupNativeOnly() {
+        synchronized(this) {
             try {
-                VpnBridge.stopEngine()
-                tunFd?.close()
-                tunFd = null
-                Log.i(TAG, "VPN stopped")
+                VpnBridge.stopEngine() // This is expected to call native close() on the FD
             } catch (t: Throwable) {
-                Log.e(TAG, "Error stopping native engine", t)
-            } finally {
-                stopSelf()
+                Log.w(TAG, "Error stopping native engine", t)
+            }
+            activeTunFd = -1
+        }
+    }
+
+    private fun cleanupResources() {
+        tunnelJob?.cancel()
+        statusJob?.cancel()
+        cleanupNativeOnly()
+    }
+
+    private fun closeRawFd(fd: Int) {
+        if (fd != -1) {
+            try {
+                // Temporary adoption just to close it
+                ParcelFileDescriptor.adoptFd(fd).close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing raw FD $fd", e)
             }
         }
     }
 
     override fun onDestroy() {
+        Log.d(TAG, "onDestroy")
         instance = null
         try {
-            (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
-                .unregisterNetworkCallback(networkCallback)
-        } catch (_: Throwable) { }
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.unregisterNetworkCallback(networkCallback)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to unregister network callback", e)
+        }
+        cleanupResources()
         super.onDestroy()
-        stopTunnel()
     }
 
     companion object {
         private var instance: HomeVpnService? = null
 
-        /**
-         * This method is called by the Go native code via JNI 
-         * to exclude signaling traffic from the VPN tunnel.
-         */
         @JvmStatic
         fun protectSocketFromNative(fd: Int): Boolean {
             val res = instance?.protect(fd) ?: false
-            if (!res) Log.w(TAG, "Socket protection failed for fd: $fd (Service instance null? ${instance == null})")
+            if (!res) Log.w(TAG, "protectSocketFromNative: Socket protection failed for fd: $fd")
             return res
         }
     }
