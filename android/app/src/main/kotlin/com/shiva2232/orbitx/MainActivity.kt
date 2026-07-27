@@ -20,7 +20,6 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 
 import kotlinx.coroutines.cancel
-import go.Seq
 
 class MainActivity : FlutterActivity() {
     private val scope = MainScope()
@@ -59,7 +58,7 @@ class MainActivity : FlutterActivity() {
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         // forceCellularNetwork()
         try {
-            Seq.setContext(this)
+            // Seq.setContext(this)
         } catch (e: Exception) {
             Log.w("TAG", "Gomobile Seq context not initialized")
         }

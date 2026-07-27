@@ -1,14 +1,13 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:firebase_core/firebase_core.dart';
+// import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:installed_apps/app_info.dart';
 import 'package:installed_apps/installed_apps.dart';
-import 'package:orbitx/firebase_options.dart';
 import 'package:orbitx/helper/automation_engine.dart';
 import 'package:orbitx/helper/database.dart';
 import 'package:orbitx/helper/schedule_helper.dart';
@@ -89,7 +88,6 @@ void main() async {
   //   SystemChrome.setEnabledSystemUIMode(
   //   SystemUiMode.edgeToEdge,
   // );
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const MyApp());
 }

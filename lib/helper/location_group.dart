@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:firebase_database/firebase_database.dart';
+// import 'package:firebase_database/firebase_database.dart';
 
 class UserLocation {
   final String name;
@@ -37,12 +37,12 @@ class UserLocation {
 class EventTrackingService {
   static const timeoutMs = 15000;
 
-  final FirebaseDatabase _db = FirebaseDatabase.instance;
+  // final FirebaseDatabase _db = FirebaseDatabase.instance;
 
   String? _eventId;
   String? _userName;
 
-  DatabaseReference? _userRef;
+  // DatabaseReference? _userRef;
 
   StreamSubscription? _subscription;
 
@@ -56,22 +56,22 @@ class EventTrackingService {
     _eventId = eventId;
     _userName = userName;
 
-    _userRef = _db.ref('events/$_eventId/users/$userName');
+    // _userRef = _db.ref('events/$_eventId/users/$userName');
 
     _subscription?.cancel();
 
-    _subscription = _db
-        .ref('events/$_eventId/users')
-        .onValue
-        .listen(_handleUsersUpdate);
+    // _subscription = _db
+    //     .ref('events/$_eventId/users')
+    //     .onValue
+    //     .listen(_handleUsersUpdate);
 
     _heartbeatTimer?.cancel();
 
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      await _userRef?.update({'timestamp': ServerValue.timestamp});
+      // await _userRef?.update({'timestamp': ServerValue.timestamp});
     });
 
-    await _userRef!.onDisconnect().remove();
+    // await _userRef!.onDisconnect().remove();
   }
 
   Future updateLocation({
@@ -81,47 +81,49 @@ class EventTrackingService {
     required double speed,
     required double acceleration,
   }) async {
-    if (_userRef == null) return;
+    // if (_userRef == null) return;
 
-    await _userRef!.set({
-      'latitude': latitude,
-      'longitude': longitude,
-      'altitude': altitude,
-      'speed': speed,
-      'acceleration': acceleration,
-      'timestamp': ServerValue.timestamp,
-    });
+    // await _userRef!.set({
+    //   'latitude': latitude,
+    //   'longitude': longitude,
+    //   'altitude': altitude,
+    //   'speed': speed,
+    //   'acceleration': acceleration,
+    //   'timestamp': ServerValue.timestamp,
+    // });
   }
 
-  void _handleUsersUpdate(DatabaseEvent event) {
-    final value = event.snapshot.value;
+  void _handleUsersUpdate(
+    // DatabaseEvent event
+    ) {
+    // final value = event.snapshot.value;
 
-    if (value == null || value is! Map<dynamic, dynamic>) {
-      _usersController.add([]);
-      return;
-    }
+    // if (value == null || value is! Map<dynamic, dynamic>) {
+    //   _usersController.add([]);
+    //   return;
+    // }
 
     final now = DateTime.now().millisecondsSinceEpoch;
 
     final users = <UserLocation>[];
 
-    value.forEach((key, rawUser) {
-      if (key == _userName) {
-        return;
-      }
+    // value.forEach((key, rawUser) {
+    //   if (key == _userName) {
+    //     return;
+    //   }
 
-      if (rawUser is! Map<dynamic, dynamic>) {
-        return;
-      }
+    //   if (rawUser is! Map<dynamic, dynamic>) {
+    //     return;
+    //   }
 
-      final user = UserLocation.fromMap(key.toString(), rawUser);
+    //   final user = UserLocation.fromMap(key.toString(), rawUser);
 
-      if (now - user.timestamp > timeoutMs) {
-        return;
-      }
+    //   if (now - user.timestamp > timeoutMs) {
+    //     return;
+    //   }
 
-      users.add(user);
-    });
+    //   users.add(user);
+    // });
 
     _usersController.add(users);
   }
@@ -129,13 +131,13 @@ class EventTrackingService {
   Future leave() async {
     _heartbeatTimer?.cancel();
 
-    await _userRef?.remove();
+    // await _userRef?.remove();
 
     await _subscription?.cancel();
 
     _eventId = null;
     _userName = null;
-    _userRef = null;
+    // _userRef = null;
   }
 
   Future dispose() async {
