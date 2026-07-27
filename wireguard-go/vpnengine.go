@@ -240,10 +240,6 @@ func StartEngine(cpair *C.char, crole *C.char, csecret *C.char) C.int {
 		stunAddr = addr
 	}
 
-	// Bootstrap Write: Publish public key immediately so peer can see us
-	log.Printf("[vpnengine] Performing bootstrap publish for role: %s", role)
-	writeEndpointToFirebase(pair, role, "0.0.0.0", 0)
-
 	go heartbeatLoop(ctx, pair, role)
 	go listenPeerEndpoint(ctx, pair, oppositeRole(role))
 
