@@ -54,6 +54,7 @@ dependencies {
 
 //    implementation("com.wireguard.android:tunnel:1.0.20230706")
 //    implementation(files("lib/firewg-p2p.aar"))
+    implementation(files("libs/frpwrapper.aar"))
 }
 
 kotlin {

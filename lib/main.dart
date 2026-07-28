@@ -10,6 +10,7 @@ import 'package:installed_apps/app_info.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:orbitx/helper/automation_engine.dart';
 import 'package:orbitx/helper/database.dart';
+import 'package:orbitx/helper/frp_config.dart';
 import 'package:orbitx/helper/schedule_helper.dart';
 import 'package:orbitx/helper/variable_context.dart';
 import 'package:orbitx/screens/apps_screen.dart';
@@ -20,6 +21,7 @@ import 'package:orbitx/screens/terminal_screen.dart';
 import 'package:orbitx/screens/utils_screen.dart';
 import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
+import 'package:orbitx/services/frp_service.dart';
 import 'package:orbitx/services/socket_service.dart';
 import 'package:orbitx/vpn_controller.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -131,6 +133,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   List<AppInfo> filtered = [];
   bool showLay = false;
   bool isMaster = false;
+  bool isFrps=false;
 
   String get currentRole => isMaster ? 'master' : 'slave';
 
@@ -367,30 +370,168 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   ),
                   child: ListView(
                     children: [
-                      Material(
-                        child: Ink(
-                          decoration: BoxDecoration(
-                            color: Colors.white, // Magenta background
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: ListTile(
-                            textColor: Colors.blue,
-                            title: const Text('TUNNEL'),
-                            subtitle: Text(
-                              tunnelConnected
-                                  ? 'Connected: ${tunnelPeerIp ?? 'unknown'}:${tunnelPeerPort ?? 0}'
-                                  : (vpnEnabled
-                                        ? 'Waiting for tunnel...'
-                                        : 'Tap switch to enable VPN'),
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(isMaster ? 'Server' : 'Client'),
+                                Switch(
+                                  value: isMaster,
+                                  onChanged: vpnEnabled
+                                      ? null
+                                      : (val) => {
+                                          setState(() {
+                                            isMaster = val;
+                                          }),
+                                        },
+                                ),
+                              ],
                             ),
-                            trailing: Switch(
-                              value: vpnEnabled,
-                              onChanged: (value) {
-                                _setVpnEnabled(value);
-                              },
+                          ),
+                          Center(
+                            child: Column(
+                              children: [
+                                Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () {
+                                      _setVpnEnabled(!vpnEnabled);
+                                    },
+                                    borderRadius: BorderRadius.circular(
+                                      MediaQuery.of(context).size.shortestSide /
+                                          1.5,
+                                    ),
+                                    child: Ink(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.transparent,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: vpnEnabled
+                                                ? Colors.green
+                                                : Colors
+                                                      .blue, // Custom shadow color
+                                            blurRadius:
+                                                0, // Moves shadow slightly down (x, y)
+                                          ),
+                                        ],
+                                      ),
+                                      child: Container(
+                                        width:
+                                            MediaQuery.of(
+                                              context,
+                                            ).size.shortestSide /
+                                            3,
+                                        height:
+                                            MediaQuery.of(
+                                              context,
+                                            ).size.shortestSide /
+                                            3,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: vpnEnabled
+                                                  ? Colors.green
+                                                  : Colors.blue,
+                                              blurRadius: 10,
+                                            ),
+                                          ],
+                                        ),
+                                        child: Icon(
+                                          Icons.power_settings_new_sharp,
+                                          color: vpnEnabled
+                                              ? Colors.green
+                                              : Colors.blue,
+                                          size:
+                                              MediaQuery.of(
+                                                context,
+                                              ).size.shortestSide /
+                                              8,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Text(
+                                    tunnelConnected
+                                        ? 'Connected: ${tunnelPeerIp ?? 'unknown'}:${tunnelPeerPort ?? 0}'
+                                        : (vpnEnabled
+                                              ? 'Waiting for tunnel...'
+                                              : 'Tap switch to enable VPN'),
+                                    style: TextStyle(
+                                      backgroundColor: Colors.white.withAlpha(
+                                        100,
+                                      ),
+                                      color: Colors.blue,
+                                    ),
+                                  ),
+                                ),
+                                Padding(
+                                  padding: EdgeInsets.all(
+                                    MediaQuery.of(context).size.shortestSide /
+                                        16,
+                                  ),
+                                  child: Card(
+                                    color: Colors.white,
+                                    shadowColor: Colors.grey,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(10),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceEvenly,
+                                        spacing: 20,
+                                        children: [
+                                          Column(
+                                            children: [
+                                              Text(
+                                                "Virtual IP",
+                                                style: TextStyle(fontSize: 12),
+                                              ),
+                                              Text(
+                                                isMaster
+                                                    ? '10.0.0.1'
+                                                    : '10.0.0.2',
+                                                style: TextStyle(fontSize: 16),
+                                              ),
+                                            ],
+                                          ),
+                                          Column(
+                                            children: [
+                                              Text(
+                                                "Peer IP",
+                                                style: TextStyle(fontSize: 12),
+                                              ),
+                                              Text(
+                                                isMaster
+                                                    ? '10.0.0.2'
+                                                    : '10.0.0.1',
+                                                style: TextStyle(fontSize: 16),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
+                        ],
                       ),
                       Material(
                         child: Ink(
@@ -462,27 +603,30 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
-                      Material(
-                        child: ListTile(
-                          title: const Text('Device Role'),
-                          subtitle: Text(currentRole.toUpperCase()),
-                          trailing: Switch(
-                            value: isMaster,
-                            onChanged: (value) {
-                              setState(() {
-                                isMaster = value;
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    value
-                                        ? 'Role set to MASTER'
-                                        : 'Role set to SLAVE',
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Allow local network'),
+                            Switch(
+                              value: isFrps,
+                              onChanged: !vpnEnabled
+                                  ? null
+                                  : (val) => {
+                                    if(val){
+                                    FrpService.startFrps(FrpsConfig(
+                                      authToken: "HRyz5HYfW9B7d6Z3",
+                                      bindAddr: '0.0.0.0', // connect any network device.
+                                      bindPort: 7000,
+                                    ).toTomlString())
+                                    }else{
+                                      FrpService.stopFrps()
+                                    }
+                                    },
+                            ),
+                          ],
                         ),
                       ),
                     ],

@@ -18,7 +18,8 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
-
+import frpwrapper.Frpwrapper
+import kotlin.concurrent.thread
 import kotlinx.coroutines.cancel
 
 class MainActivity : FlutterActivity() {
@@ -144,6 +145,61 @@ class MainActivity : FlutterActivity() {
                 "stopService" -> {
                     stopService(Intent(this, HomeVpnService::class.java))
                     result.success(true)
+                }
+                "startFrps" -> {
+                    val config = call.argument<String>("config")
+                    if (config == null) {
+                        result.error("INVALID_ARGUMENT", "Config content is required", null)
+                        return@setMethodCallHandler
+                    }
+
+                    // Run in a background thread as FRP blocks
+                    thread {
+                        try {
+                            Frpwrapper.startFrps(config)
+                            // Note: startFrps blocks until stopped
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                    result.success("FRPS Started")
+                }
+                "stopFrps" -> {
+                    thread {
+                        try {
+                            Frpwrapper.stopFrps()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                    result.success("FRPS Stopped")
+                }
+                "startFrpc" -> {
+                    val config = call.argument<String>("config")
+                    if (config == null) {
+                        result.error("INVALID_ARGUMENT", "Config content is required", null)
+                        return@setMethodCallHandler
+                    }
+
+                    thread {
+                        try {
+                            Frpwrapper.startFrpc(config)
+                            // Note: startFrpc blocks until stopped
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                    result.success("FRPC Started")
+                }
+                "stopFrpc" -> {
+                    thread {
+                        try {
+                            Frpwrapper.stopFrpc()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                    result.success("FRPC Stopped")
                 }
                 else -> result.notImplemented()
             }
