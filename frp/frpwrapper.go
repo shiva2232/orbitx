@@ -1,4 +1,18 @@
-package frpwrapper
+package main
+
+/*
+#include <jni.h>
+#include <stdlib.h>
+
+static const char* GetStringUTFChars(JNIEnv* env, jstring str, jboolean* isCopy) {
+    return (*env)->GetStringUTFChars(env, str, isCopy);
+}
+
+static void ReleaseStringUTFChars(JNIEnv* env, jstring str, const char* chars) {
+    (*env)->ReleaseStringUTFChars(env, str, chars);
+}
+*/
+import "C"
 
 import (
 	"context"
@@ -61,7 +75,6 @@ func StartFrps(configContent string) error {
 		return err
 	}
 
-	// Correct for Server: svr.Run() takes NO arguments and has NO return value
 	svr.Run(ctx)
 	return nil
 }
@@ -77,7 +90,7 @@ func StopFrps() {
 	}
 }
 
-// StartFrpc runs the FRP client from an in-memory configuration string
+// StartFrpc runs the FRP client
 func StartFrpc(configContent string) error {
 	frpcMu.Lock()
 	if frpcCancel != nil {
@@ -89,27 +102,24 @@ func StartFrpc(configContent string) error {
 	frpcCancel = cancel
 	frpcMu.Unlock()
 
-	// Ensure cleanup of cancellation state when frpc exits
 	defer func() {
 		frpcMu.Lock()
 		frpcCancel = nil
 		frpcMu.Unlock()
 	}()
-	// 1. Create a temporary TOML file
+
 	tmpFile, err := os.CreateTemp("", "frpc-*.toml")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name()) // Clean up after execution
+	defer os.Remove(tmpFile.Name())
 
-	// 2. Write the config string into the temp file
 	if _, err := tmpFile.WriteString(configContent); err != nil {
 		tmpFile.Close()
 		return err
 	}
 	tmpFile.Close()
 
-	// 3. Pass ConfigFilePath directly to ServiceOptions
 	svr, err := client.NewService(client.ServiceOptions{
 		ConfigFilePath: tmpFile.Name(),
 	})
@@ -117,7 +127,6 @@ func StartFrpc(configContent string) error {
 		return err
 	}
 
-	// 4. Run the client service with context
 	return svr.Run(ctx)
 }
 
@@ -131,3 +140,31 @@ func StopFrpc() {
 		frpcCancel = nil
 	}
 }
+
+// --- JNI Exports ---
+
+//export Java_frpwrapper_Frpwrapper_startFrps
+func Java_frpwrapper_Frpwrapper_startFrps(env *C.JNIEnv, clazz C.jclass, config C.jstring) {
+	cConfig := C.GetStringUTFChars(env, config, nil)
+	defer C.ReleaseStringUTFChars(env, config, cConfig)
+	_ = StartFrps(C.GoString(cConfig))
+}
+
+//export Java_frpwrapper_Frpwrapper_stopFrps
+func Java_frpwrapper_Frpwrapper_stopFrps(env *C.JNIEnv, clazz C.jclass) {
+	StopFrps()
+}
+
+//export Java_frpwrapper_Frpwrapper_startFrpc
+func Java_frpwrapper_Frpwrapper_startFrpc(env *C.JNIEnv, clazz C.jclass, config C.jstring) {
+	cConfig := C.GetStringUTFChars(env, config, nil)
+	defer C.ReleaseStringUTFChars(env, config, cConfig)
+	_ = StartFrpc(C.GoString(cConfig))
+}
+
+//export Java_frpwrapper_Frpwrapper_stopFrpc
+func Java_frpwrapper_Frpwrapper_stopFrpc(env *C.JNIEnv, clazz C.jclass) {
+	StopFrpc()
+}
+
+func main() {}

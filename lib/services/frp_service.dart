@@ -1,15 +1,15 @@
 import 'package:flutter/services.dart';
 
 class FrpService {
-  static const MethodChannel _channel = MethodChannel('com.example.app/frp');
+  static const MethodChannel _channel = MethodChannel('com.home.vpn/permission');
 
   /// Starts FRP Server with TOML configuration string
   static Future<String> startFrps(String configContent) async {
     try {
-      final String result = await _channel.invokeMethod('startFrps', {
+      final String? result = await _channel.invokeMethod('startFrps', {
         'config': configContent,
       });
-      return result;
+      return result ?? "Success";
     } on PlatformException catch (e) {
       throw 'Failed to start FRPS: ${e.message}';
     }
@@ -18,10 +18,10 @@ class FrpService {
   /// Starts FRP Client with TOML configuration string
   static Future<String> startFrpc(String configContent) async {
     try {
-      final String result = await _channel.invokeMethod('startFrpc', {
+      final String? result = await _channel.invokeMethod('startFrpc', {
         'config': configContent,
       });
-      return result;
+      return result ?? "Success";
     } on PlatformException catch (e) {
       throw 'Failed to start FRPC: ${e.message}';
     }
@@ -29,8 +29,8 @@ class FrpService {
 
   static Future<String> stopFrps() async {
     try {
-      final String result = await _channel.invokeMethod('stopFrps');
-      return result;
+      final String? result = await _channel.invokeMethod('stopFrps');
+      return result ?? "Success";
     } on PlatformException catch (e) {
       throw 'Failed to stop FRPS: ${e.message}';
     }
@@ -38,8 +38,8 @@ class FrpService {
 
   static Future<String> stopFrpc() async {
     try {
-      final String result = await _channel.invokeMethod('stopFrpc');
-      return result;
+      final String? result = await _channel.invokeMethod('stopFrpc');
+      return result ?? "Success";
     } on PlatformException catch (e) {
       throw 'Failed to stop FRPC: ${e.message}';
     }

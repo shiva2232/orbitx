@@ -133,7 +133,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   List<AppInfo> filtered = [];
   bool showLay = false;
   bool isMaster = false;
-  bool isFrps=false;
+  bool isFrps = false;
 
   String get currentRole => isMaster ? 'master' : 'slave';
 
@@ -614,16 +614,22 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               value: isFrps,
                               onChanged: !vpnEnabled
                                   ? null
-                                  : (val) => {
-                                    if(val){
-                                    FrpService.startFrps(FrpsConfig(
-                                      authToken: "HRyz5HYfW9B7d6Z3",
-                                      bindAddr: '0.0.0.0', // connect any network device.
-                                      bindPort: 7000,
-                                    ).toTomlString())
-                                    }else{
-                                      FrpService.stopFrps()
-                                    }
+                                  : (val) {
+                                      if (val) {
+                                        FrpService.startFrps(
+                                          FrpsConfig(
+                                            authToken: "HRyz5HYfW9B7d6Z3",
+                                            bindAddr:
+                                                '0.0.0.0', // connect any network device.
+                                            bindPort: 7000,
+                                          ).toTomlString(),
+                                        );
+                                      } else {
+                                        FrpService.stopFrps();
+                                      }
+                                      setState(() {
+                                        isFrps = val;
+                                      });
                                     },
                             ),
                           ],
