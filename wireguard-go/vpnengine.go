@@ -39,7 +39,7 @@ static int ProtectSocketFdC(int fd) {
 	int shouldDetach = 0;
 	jint envRes = (*vpn_jvm)->GetEnv(vpn_jvm, (void**)&env, JNI_VERSION_1_6);
 	if (envRes == JNI_EDETACHED) {
-		if ((*vpn_jvm)->AttachCurrentThread(vpn_jvm, (void**)&env, NULL) != JNI_OK) return 0;
+		if ((*vpn_jvm)->AttachCurrentThread(vpn_jvm, &env, NULL) != JNI_OK) return 0;
 		shouldDetach = 1;
 	} else if (envRes != JNI_OK) {
 		return 0;

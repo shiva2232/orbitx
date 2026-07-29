@@ -111,7 +111,7 @@ class HomeVpnService : VpnService() {
                 .addAddress(internalIp, 24)
                 .addRoute("10.0.0.0", 24)
                 .addDnsServer("1.1.1.1")
-                .addDisallowedApplication(packageName)
+//                .addDisallowedApplication(packageName)
 
             val pfd = builder.establish() ?: error("VPN establish() failed")
             

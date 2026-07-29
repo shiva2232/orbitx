@@ -18,15 +18,14 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
-
+import frpwrapper.Frpwrapper
+import kotlin.concurrent.thread
 import kotlinx.coroutines.cancel
 
 class MainActivity : FlutterActivity() {
     private val scope = MainScope()
     private lateinit var methodChannel: MethodChannel
     private var pendingPermissionResult: MethodChannel.Result? = null
-    
-    // Store VPN arguments in a member variable to avoid losing them
     private var pendingVpnArgs: Map<*, *>? = null
 
     private val tunReadyReceiver = object : BroadcastReceiver() {
@@ -47,21 +46,19 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // use sim only
     private lateinit var connectivityManager: ConnectivityManager
-    private var cellularNetworkCallback: ConnectivityManager.NetworkCallback? = null
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        // forceCellularNetwork()
+        // Initialize FRP Native with a writable directory for TOML configs
         try {
-            // Seq.setContext(this)
+            Frpwrapper.init(cacheDir.absolutePath)
         } catch (e: Exception) {
-            Log.w("TAG", "Gomobile Seq context not initialized")
+            Log.e("MainActivity", "Failed to initialize FRP Native: ${e.message}")
         }
+
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         val filter1 = IntentFilter(TUN_READY_ACTION)
         val filter2 = IntentFilter(CONNECTION_ESTABLISHED_ACTION)
@@ -75,51 +72,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-
-    private fun forceCellularNetwork() {
-        // 1. Build a request specifically for Cellular/Mobile data
-        val request = NetworkRequest.Builder()
-            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-
-        // 2. Define the callback to handle the network once found
-        cellularNetworkCallback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                super.onAvailable(network)
-                Log.d("NetworkManager", "Cellular network is available.")
-
-                // 3. Bind the application process to this cellular network
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    val result = connectivityManager.bindProcessToNetwork(network)
-                    Log.d("NetworkManager", "Process bound to Cellular: $result")
-                } else {
-                    // Fallback for older API versions (deprecated in API 23)
-                    @Suppress("DEPRECATION")
-                    ConnectivityManager.setProcessDefaultNetwork(network)
-                }
-            }
-
-            override fun onLost(network: Network) {
-                super.onLost(network)
-                Log.d("NetworkManager", "Cellular network lost.")
-                // Unbind if cellular goes away, reverting to system default (Wi-Fi)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    connectivityManager.bindProcessToNetwork(null)
-                } else {
-                    @Suppress("DEPRECATION")
-                    ConnectivityManager.setProcessDefaultNetwork(null)
-                }
-            }
-        }
-
-        // 4. Request the network from the system
-        cellularNetworkCallback?.let { callback ->
-            connectivityManager.requestNetwork(request, callback)
-        }
-    }
-
-
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
@@ -130,7 +82,6 @@ class MainActivity : FlutterActivity() {
                         result.error("ALREADY_PENDING", "VPN permission request already in progress", null)
                         return@setMethodCallHandler
                     }
-                    
                     val prepare = VpnService.prepare(this)
                     if (prepare != null) {
                         pendingPermissionResult = result
@@ -145,6 +96,34 @@ class MainActivity : FlutterActivity() {
                     stopService(Intent(this, HomeVpnService::class.java))
                     result.success(true)
                 }
+                "startFrps" -> {
+                    val config = call.argument<String>("config")
+                    if (config != null) {
+                        Frpwrapper.startFrps(config) // Go backgrounds this automatically
+                        result.success("FRPS Starting")
+                    } else result.error("ARG_ERR", "Config missing", null)
+                }
+                "stopFrps" -> {
+                    Frpwrapper.stopFrps()
+                    result.success("FRPS Stopped")
+                }
+                "startFrpc" -> {
+                    val config = call.argument<String>("config")
+                    if (config != null) {
+                        Frpwrapper.startFrpc(config)
+                        result.success("FRPC Starting")
+                    } else result.error("ARG_ERR", "Config missing", null)
+                }
+                "stopFrpc" -> {
+                    Frpwrapper.stopFrpc()
+                    result.success("FRPC Stopped")
+                }
+                "isFrpsRunning" -> result.success(Frpwrapper.isFrpsRunning())
+                "isFrpcRunning" -> result.success(Frpwrapper.isFrpcRunning())
+                "checkPort" -> {
+                    val port = call.argument<Int>("port") ?: 0
+                    result.success(Frpwrapper.checkPort(port))
+                }
                 else -> result.notImplemented()
             }
         }
@@ -152,9 +131,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        cellularNetworkCallback?.let { callback ->
-            connectivityManager.unregisterNetworkCallback(callback)
-        }
         scope.cancel()
         try { unregisterReceiver(tunReadyReceiver) } catch (e: Exception) {}
         try { unregisterReceiver(connectionReceiver) } catch (e: Exception) {}
