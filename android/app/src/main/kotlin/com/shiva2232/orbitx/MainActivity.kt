@@ -15,7 +15,11 @@ import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.MainScope
 
 import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import frpwrapper.Frpwrapper
+import kotlin.concurrent.thread
 import kotlinx.coroutines.cancel
 
 class MainActivity : FlutterActivity() {
@@ -42,15 +46,19 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private lateinit var connectivityManager: ConnectivityManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize FRP Native layer with application cache directory
+        // Initialize FRP Native with a writable directory for TOML configs
         try {
             Frpwrapper.init(cacheDir.absolutePath)
         } catch (e: Exception) {
-            Log.e("MainActivity", "FRP Native Init Failed: ${e.message}")
+            Log.e("MainActivity", "Failed to initialize FRP Native: ${e.message}")
         }
+
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         val filter1 = IntentFilter(TUN_READY_ACTION)
         val filter2 = IntentFilter(CONNECTION_ESTABLISHED_ACTION)
@@ -71,7 +79,7 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "requestPermission" -> {
                     if (pendingPermissionResult != null) {
-                        result.error("ALREADY_PENDING", "VPN request in progress", null)
+                        result.error("ALREADY_PENDING", "VPN permission request already in progress", null)
                         return@setMethodCallHandler
                     }
                     val prepare = VpnService.prepare(this)
@@ -91,24 +99,24 @@ class MainActivity : FlutterActivity() {
                 "startFrps" -> {
                     val config = call.argument<String>("config")
                     if (config != null) {
-                        Frpwrapper.startFrps(config)
+                        Frpwrapper.startFrps(config) // Go backgrounds this automatically
                         result.success("FRPS Starting")
-                    } else result.error("ERR", "Config NULL", null)
+                    } else result.error("ARG_ERR", "Config missing", null)
                 }
                 "stopFrps" -> {
                     Frpwrapper.stopFrps()
-                    result.success("FRPS Stop Requested")
+                    result.success("FRPS Stopped")
                 }
                 "startFrpc" -> {
                     val config = call.argument<String>("config")
                     if (config != null) {
                         Frpwrapper.startFrpc(config)
                         result.success("FRPC Starting")
-                    } else result.error("ERR", "Config NULL", null)
+                    } else result.error("ARG_ERR", "Config missing", null)
                 }
                 "stopFrpc" -> {
                     Frpwrapper.stopFrpc()
-                    result.success("FRPC Stop Requested")
+                    result.success("FRPC Stopped")
                 }
                 "isFrpsRunning" -> result.success(Frpwrapper.isFrpsRunning())
                 "isFrpcRunning" -> result.success(Frpwrapper.isFrpcRunning())
@@ -129,7 +137,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun showTunnelConnectedToast() {
-        Toast.makeText(this, "OrbitX Tunnel Connected", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Connected over tunnel", Toast.LENGTH_SHORT).show()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -151,10 +159,14 @@ class MainActivity : FlutterActivity() {
             action = "START_VPN"
             putExtra("pairingHash", args?.get("pairingHash") as? String)
             putExtra("role", args?.get("role") as? String)
+            putExtra("deviceName", args?.get("deviceName") as? String)
             putExtra("presharedSecret", args?.get("presharedSecret") as? String)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-        else startService(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
     }
 
     companion object {
