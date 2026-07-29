@@ -23,16 +23,28 @@ extern const char *_GoStringPtr(_GoString_ s);
 
 #line 3 "frpwrapper.go"
 
+
+
 #include <jni.h>
 #include <stdlib.h>
+#include <android/log.h>
+
+#define LOG_TAG "FRP_NATIVE"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 static const char* GetStringUTFChars(JNIEnv* env, jstring str, jboolean* isCopy) {
+    if (str == NULL) return NULL;
     return (*env)->GetStringUTFChars(env, str, isCopy);
 }
 
 static void ReleaseStringUTFChars(JNIEnv* env, jstring str, const char* chars) {
+    if (env == NULL || str == NULL || chars == NULL) return;
     (*env)->ReleaseStringUTFChars(env, str, chars);
 }
+
+static void log_info(const char* msg) { LOGI("%s", msg); }
+static void log_error(const char* msg) { LOGE("%s", msg); }
 
 #line 1 "cgo-generated-wrapper"
 
@@ -96,10 +108,14 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
+extern void Java_frpwrapper_Frpwrapper_init(JNIEnv* env, jclass clazz, jstring cacheDir);
 extern void Java_frpwrapper_Frpwrapper_startFrps(JNIEnv* env, jclass clazz, jstring config);
 extern void Java_frpwrapper_Frpwrapper_stopFrps(JNIEnv* env, jclass clazz);
 extern void Java_frpwrapper_Frpwrapper_startFrpc(JNIEnv* env, jclass clazz, jstring config);
 extern void Java_frpwrapper_Frpwrapper_stopFrpc(JNIEnv* env, jclass clazz);
+extern jboolean Java_frpwrapper_Frpwrapper_isFrpsRunning(JNIEnv* env, jclass clazz);
+extern jboolean Java_frpwrapper_Frpwrapper_isFrpcRunning(JNIEnv* env, jclass clazz);
+extern jboolean Java_frpwrapper_Frpwrapper_checkPort(JNIEnv* env, jclass clazz, jint port);
 
 #ifdef __cplusplus
 }

@@ -1,24 +1,41 @@
 package main
 
 /*
+#cgo LDFLAGS: -llog
+
 #include <jni.h>
 #include <stdlib.h>
+#include <android/log.h>
+
+#define LOG_TAG "FRP_NATIVE"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 static const char* GetStringUTFChars(JNIEnv* env, jstring str, jboolean* isCopy) {
+    if (str == NULL) return NULL;
     return (*env)->GetStringUTFChars(env, str, isCopy);
 }
 
 static void ReleaseStringUTFChars(JNIEnv* env, jstring str, const char* chars) {
+    if (env == NULL || str == NULL || chars == NULL) return;
     (*env)->ReleaseStringUTFChars(env, str, chars);
 }
+
+static void log_info(const char* msg) { LOGI("%s", msg); }
+static void log_error(const char* msg) { LOGE("%s", msg); }
 */
 import "C"
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"path/filepath"
 	"sync"
+	"time"
+	"unsafe"
 
 	"github.com/fatedier/frp/client"
 	"github.com/fatedier/frp/pkg/config"
@@ -26,46 +43,72 @@ import (
 )
 
 var (
-	frpsCancel context.CancelFunc
-	frpsMu     sync.Mutex
+	frpsCancel  context.CancelFunc
+	frpsMu      sync.Mutex
+	frpsRunning bool
+
+	frpcCancel  context.CancelFunc
+	frpcMu      sync.Mutex
+	frpcRunning bool
+
+	workDir string
+	logOnce sync.Once
 )
 
-var (
-	frpcCancel context.CancelFunc
-	frpcMu     sync.Mutex
-)
+func logInfo(msg string) {
+	cmsg := C.CString(msg)
+	C.log_info(cmsg)
+	C.free(unsafe.Pointer(cmsg))
+}
 
-// StartFrps runs the server service
+func logError(msg string) {
+	cmsg := C.CString(msg)
+	C.log_error(cmsg)
+	C.free(unsafe.Pointer(cmsg))
+}
+
+func redirectLogs() {
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	os.Stderr = w
+	go func() {
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			logInfo("[FRP-CORE] " + scanner.Text())
+		}
+	}()
+}
+
 func StartFrps(configContent string) error {
 	frpsMu.Lock()
 	if frpsCancel != nil {
 		frpsMu.Unlock()
 		return fmt.Errorf("frps is already running")
 	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	frpsCancel = cancel
+	frpsRunning = true
 	frpsMu.Unlock()
 
 	defer func() {
 		frpsMu.Lock()
 		frpsCancel = nil
+		frpsRunning = false
 		frpsMu.Unlock()
 	}()
 
-	tmpFile, err := os.CreateTemp("", "frps-*.toml")
-	if err != nil {
+	if workDir == "" {
+		return fmt.Errorf("workDir not initialized")
+	}
+
+	tmpPath := filepath.Join(workDir, "frps.toml")
+	if err := os.WriteFile(tmpPath, []byte(configContent), 0644); err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
+	defer os.Remove(tmpPath)
 
-	if _, err := tmpFile.WriteString(configContent); err != nil {
-		tmpFile.Close()
-		return err
-	}
-	tmpFile.Close()
-
-	cfg, _, err := config.LoadServerConfig(tmpFile.Name(), false)
+	// LoadServerConfig returns (*v1.ServerConfig, bool, error)
+	cfg, _, err := config.LoadServerConfig(tmpPath, false)
 	if err != nil {
 		return err
 	}
@@ -75,96 +118,136 @@ func StartFrps(configContent string) error {
 		return err
 	}
 
+	logInfo(fmt.Sprintf("FRPS starting on %s:%d", cfg.BindAddr, cfg.BindPort))
 	svr.Run(ctx)
 	return nil
 }
 
-// StopFrps cancels the context and gracefully shuts down the server
-func StopFrps() {
-	frpsMu.Lock()
-	defer frpsMu.Unlock()
-
-	if frpsCancel != nil {
-		frpsCancel()
-		frpsCancel = nil
-	}
-}
-
-// StartFrpc runs the FRP client
 func StartFrpc(configContent string) error {
 	frpcMu.Lock()
 	if frpcCancel != nil {
 		frpcMu.Unlock()
 		return fmt.Errorf("frpc is already running")
 	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	frpcCancel = cancel
+	frpcRunning = true
 	frpcMu.Unlock()
 
 	defer func() {
 		frpcMu.Lock()
 		frpcCancel = nil
+		frpcRunning = false
 		frpcMu.Unlock()
 	}()
 
-	tmpFile, err := os.CreateTemp("", "frpc-*.toml")
-	if err != nil {
+	if workDir == "" {
+		return fmt.Errorf("workDir not initialized")
+	}
+
+	tmpPath := filepath.Join(workDir, "frpc.toml")
+	if err := os.WriteFile(tmpPath, []byte(configContent), 0644); err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
+	defer os.Remove(tmpPath)
 
-	if _, err := tmpFile.WriteString(configContent); err != nil {
-		tmpFile.Close()
-		return err
-	}
-	tmpFile.Close()
-
+	// Use ConfigFilePath to let FRP handle loading internally
 	svr, err := client.NewService(client.ServiceOptions{
-		ConfigFilePath: tmpFile.Name(),
+		ConfigFilePath: tmpPath,
 	})
 	if err != nil {
 		return err
 	}
 
-	return svr.Run(ctx)
-}
-
-// StopFrpc cancels the context and gracefully shuts down the client
-func StopFrpc() {
-	frpcMu.Lock()
-	defer frpcMu.Unlock()
-
-	if frpcCancel != nil {
-		frpcCancel()
-		frpcCancel = nil
-	}
+	logInfo("FRPC starting...")
+	svr.Run(ctx)
+	return nil
 }
 
 // --- JNI Exports ---
 
+//export Java_frpwrapper_Frpwrapper_init
+func Java_frpwrapper_Frpwrapper_init(env *C.JNIEnv, clazz C.jclass, cacheDir C.jstring) {
+	cStr := C.GetStringUTFChars(env, cacheDir, nil)
+	if cStr != nil {
+		workDir = C.GoString(cStr)
+		C.ReleaseStringUTFChars(env, cacheDir, cStr)
+	}
+	logOnce.Do(redirectLogs)
+	logInfo(fmt.Sprintf("FRP Native Initialized. WorkDir: %s", workDir))
+}
+
 //export Java_frpwrapper_Frpwrapper_startFrps
 func Java_frpwrapper_Frpwrapper_startFrps(env *C.JNIEnv, clazz C.jclass, config C.jstring) {
-	cConfig := C.GetStringUTFChars(env, config, nil)
-	defer C.ReleaseStringUTFChars(env, config, cConfig)
-	_ = StartFrps(C.GoString(cConfig))
+	cStr := C.GetStringUTFChars(env, config, nil)
+	if cStr == nil { return }
+	goConfig := C.GoString(cStr)
+	C.ReleaseStringUTFChars(env, config, cStr)
+
+	go func() {
+		if err := StartFrps(goConfig); err != nil {
+			logError(fmt.Sprintf("FRPS Fatal Error: %v", err))
+		}
+	}()
 }
 
 //export Java_frpwrapper_Frpwrapper_stopFrps
 func Java_frpwrapper_Frpwrapper_stopFrps(env *C.JNIEnv, clazz C.jclass) {
-	StopFrps()
+	frpsMu.Lock()
+	if frpsCancel != nil {
+		frpsCancel()
+		frpsCancel = nil
+	}
+	frpsMu.Unlock()
 }
 
 //export Java_frpwrapper_Frpwrapper_startFrpc
 func Java_frpwrapper_Frpwrapper_startFrpc(env *C.JNIEnv, clazz C.jclass, config C.jstring) {
-	cConfig := C.GetStringUTFChars(env, config, nil)
-	defer C.ReleaseStringUTFChars(env, config, cConfig)
-	_ = StartFrpc(C.GoString(cConfig))
+	cStr := C.GetStringUTFChars(env, config, nil)
+	if cStr == nil { return }
+	goConfig := C.GoString(cStr)
+	C.ReleaseStringUTFChars(env, config, cStr)
+
+	go func() {
+		if err := StartFrpc(goConfig); err != nil {
+			logError(fmt.Sprintf("FRPC Fatal Error: %v", err))
+		}
+	}()
 }
 
 //export Java_frpwrapper_Frpwrapper_stopFrpc
 func Java_frpwrapper_Frpwrapper_stopFrpc(env *C.JNIEnv, clazz C.jclass) {
-	StopFrpc()
+	frpcMu.Lock()
+	if frpcCancel != nil {
+		frpcCancel()
+		frpcCancel = nil
+	}
+	frpcMu.Unlock()
+}
+
+//export Java_frpwrapper_Frpwrapper_isFrpsRunning
+func Java_frpwrapper_Frpwrapper_isFrpsRunning(env *C.JNIEnv, clazz C.jclass) C.jboolean {
+	frpsMu.Lock()
+	defer frpsMu.Unlock()
+	if frpsRunning { return C.JNI_TRUE }
+	return C.JNI_FALSE
+}
+
+//export Java_frpwrapper_Frpwrapper_isFrpcRunning
+func Java_frpwrapper_Frpwrapper_isFrpcRunning(env *C.JNIEnv, clazz C.jclass) C.jboolean {
+	frpcMu.Lock()
+	defer frpcMu.Unlock()
+	if frpcRunning { return C.JNI_TRUE }
+	return C.JNI_FALSE
+}
+
+//export Java_frpwrapper_Frpwrapper_checkPort
+func Java_frpwrapper_Frpwrapper_checkPort(env *C.JNIEnv, clazz C.jclass, port C.jint) C.jboolean {
+	address := fmt.Sprintf("127.0.0.1:%d", int(port))
+	conn, err := net.DialTimeout("tcp", address, 200*time.Millisecond)
+	if err != nil { return C.JNI_FALSE }
+	conn.Close()
+	return C.JNI_TRUE
 }
 
 func main() {}

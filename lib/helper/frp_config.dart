@@ -1,21 +1,16 @@
 enum ProxyType { tcp, udp, http, https, stcp, xtcp }
 
-/// Helper extension to serialize enums safely to TOML string values
 extension ProxyTypeExtension on ProxyType {
   String get value => toString().split('.').last;
 }
-
-// ============================================================================
-// FRP CLIENT CONFIGURATION (frpc)
-// ============================================================================
 
 class FrpProxyConfig {
   final String name;
   final ProxyType type;
   final String localIp;
   final int localPort;
-  final int? remotePort; // Required for TCP/UDP
-  final List<String>? customDomains; // Required for HTTP/HTTPS
+  final int? remotePort;
+  final List<String>? customDomains;
   final String? subdomain;
 
   const FrpProxyConfig({
@@ -28,7 +23,6 @@ class FrpProxyConfig {
     this.subdomain,
   });
 
-  /// Serializes individual proxy section into TOML string format
   String toTomlString() {
     final buffer = StringBuffer();
     buffer.writeln('[[proxies]]');
@@ -36,20 +30,14 @@ class FrpProxyConfig {
     buffer.writeln('type = "${type.value}"');
     buffer.writeln('localIP = "$localIp"');
     buffer.writeln('localPort = $localPort');
-
-    if (remotePort != null) {
-      buffer.writeln('remotePort = $remotePort');
-    }
-
+    if (remotePort != null) buffer.writeln('remotePort = $remotePort');
     if (customDomains != null && customDomains!.isNotEmpty) {
       final domains = customDomains!.map((d) => '"$d"').join(', ');
       buffer.writeln('customDomains = [$domains]');
     }
-
     if (subdomain != null && subdomain!.isNotEmpty) {
       buffer.writeln('subdomain = "$subdomain"');
     }
-
     return buffer.toString();
   }
 }
@@ -67,33 +55,24 @@ class FrpcConfig {
     this.proxies = const [],
   });
 
-  /// Generates full frpc.toml configuration string
   String toTomlString() {
     final buffer = StringBuffer();
-
-    buffer.writeln('# Generated frpc.toml');
     buffer.writeln('serverAddr = "$serverAddr"');
     buffer.writeln('serverPort = $serverPort');
-
     if (authToken != null && authToken!.isNotEmpty) {
       buffer.writeln('\n[auth]');
+      buffer.writeln('method = "token"');
       buffer.writeln('token = "$authToken"');
     }
-
     if (proxies.isNotEmpty) {
       buffer.writeln();
       for (final proxy in proxies) {
         buffer.writeln(proxy.toTomlString());
       }
     }
-
     return buffer.toString();
   }
 }
-
-// ============================================================================
-// FRP SERVER CONFIGURATION (frps)
-// ============================================================================
 
 class FrpsWebServerConfig {
   final String addr;
@@ -136,31 +115,18 @@ class FrpsConfig {
     this.webServer,
   });
 
-  /// Generates full frps.toml configuration string
   String toTomlString() {
     final buffer = StringBuffer();
-
-    buffer.writeln('# Generated frps.toml');
     buffer.writeln('bindAddr = "$bindAddr"');
     buffer.writeln('bindPort = $bindPort');
-
-    if (vhostHttpPort != null) {
-      buffer.writeln('vhostHTTPPort = $vhostHttpPort');
-    }
-
-    if (vhostHttpsPort != null) {
-      buffer.writeln('vhostHTTPSPort = $vhostHttpsPort');
-    }
-
+    if (vhostHttpPort != null) buffer.writeln('vhostHTTPPort = $vhostHttpPort');
+    if (vhostHttpsPort != null) buffer.writeln('vhostHTTPSPort = $vhostHttpsPort');
     if (authToken != null && authToken!.isNotEmpty) {
       buffer.writeln('\n[auth]');
+      buffer.writeln('method = "token"');
       buffer.writeln('token = "$authToken"');
     }
-
-    if (webServer != null) {
-      buffer.writeln('\n${webServer!.toTomlString()}');
-    }
-
+    if (webServer != null) buffer.writeln('\n${webServer!.toTomlString()}');
     return buffer.toString();
   }
 }

@@ -44,4 +44,28 @@ class FrpService {
       throw 'Failed to stop FRPC: ${e.message}';
     }
   }
+
+  static Future<bool> isFrpsRunning() async {
+    try {
+      return await _channel.invokeMethod('isFrpsRunning') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> isFrpcRunning() async {
+    try {
+      return await _channel.invokeMethod('isFrpcRunning') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> checkPort(int port) async {
+    try {
+      return await _channel.invokeMethod('checkPort', {'port': port}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

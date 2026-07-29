@@ -616,6 +616,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                   ? null
                                   : (val) {
                                       if (val) {
+                                        debugPrint(FrpsConfig(
+                                          authToken: "HRyz5HYfW9B7d6Z3",
+                                          bindAddr:
+                                          '0.0.0.0', // connect any network device.
+                                          bindPort: 7000,
+                                        ).toTomlString(),
+                                        );
                                         FrpService.startFrps(
                                           FrpsConfig(
                                             authToken: "HRyz5HYfW9B7d6Z3",
