@@ -46,10 +46,12 @@ var (
 	frpsCancel  context.CancelFunc
 	frpsMu      sync.Mutex
 	frpsRunning bool
+	frpsSvr     *server.Service
 
 	frpcCancel  context.CancelFunc
 	frpcMu      sync.Mutex
 	frpcRunning bool
+	frpcSvr     *client.Service
 
 	workDir string
 	logOnce sync.Once
@@ -94,6 +96,7 @@ func StartFrps(configContent string) error {
 		frpsMu.Lock()
 		frpsCancel = nil
 		frpsRunning = false
+		frpsSvr = nil
 		frpsMu.Unlock()
 	}()
 
@@ -107,7 +110,6 @@ func StartFrps(configContent string) error {
 	}
 	defer os.Remove(tmpPath)
 
-	// LoadServerConfig returns (*v1.ServerConfig, bool, error)
 	cfg, _, err := config.LoadServerConfig(tmpPath, false)
 	if err != nil {
 		return err
@@ -117,6 +119,10 @@ func StartFrps(configContent string) error {
 	if err != nil {
 		return err
 	}
+
+	frpsMu.Lock()
+	frpsSvr = svr
+	frpsMu.Unlock()
 
 	logInfo(fmt.Sprintf("FRPS starting on %s:%d", cfg.BindAddr, cfg.BindPort))
 	svr.Run(ctx)
@@ -138,6 +144,7 @@ func StartFrpc(configContent string) error {
 		frpcMu.Lock()
 		frpcCancel = nil
 		frpcRunning = false
+		frpcSvr = nil
 		frpcMu.Unlock()
 	}()
 
@@ -151,13 +158,16 @@ func StartFrpc(configContent string) error {
 	}
 	defer os.Remove(tmpPath)
 
-	// Use ConfigFilePath to let FRP handle loading internally
 	svr, err := client.NewService(client.ServiceOptions{
 		ConfigFilePath: tmpPath,
 	})
 	if err != nil {
 		return err
 	}
+
+	frpcMu.Lock()
+	frpcSvr = svr
+	frpcMu.Unlock()
 
 	logInfo("FRPC starting...")
 	svr.Run(ctx)
@@ -198,6 +208,9 @@ func Java_frpwrapper_Frpwrapper_stopFrps(env *C.JNIEnv, clazz C.jclass) {
 		frpsCancel()
 		frpsCancel = nil
 	}
+	if frpsSvr != nil {
+		frpsSvr.Close()
+	}
 	frpsMu.Unlock()
 }
 
@@ -221,6 +234,9 @@ func Java_frpwrapper_Frpwrapper_stopFrpc(env *C.JNIEnv, clazz C.jclass) {
 	if frpcCancel != nil {
 		frpcCancel()
 		frpcCancel = nil
+	}
+	if frpcSvr != nil {
+		frpcSvr.Close()
 	}
 	frpcMu.Unlock()
 }

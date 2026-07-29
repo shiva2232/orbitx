@@ -29,8 +29,8 @@ class FrpService {
 
   static Future<String> stopFrps() async {
     try {
-      final String? result = await _channel.invokeMethod('stopFrps');
-      return result ?? "Success";
+      await _channel.invokeMethod('stopFrps');
+      return "Success";
     } on PlatformException catch (e) {
       throw 'Failed to stop FRPS: ${e.message}';
     }
@@ -38,8 +38,8 @@ class FrpService {
 
   static Future<String> stopFrpc() async {
     try {
-      final String? result = await _channel.invokeMethod('stopFrpc');
-      return result ?? "Success";
+      await _channel.invokeMethod('stopFrpc');
+      return "Success";
     } on PlatformException catch (e) {
       throw 'Failed to stop FRPC: ${e.message}';
     }
