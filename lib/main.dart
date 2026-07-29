@@ -609,7 +609,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           crossAxisAlignment: CrossAxisAlignment.center,
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Allow local network'),
+                            Text('Allow local network(via frps)'),
                             Switch(
                               value: isFrps,
                               onChanged: !vpnEnabled
