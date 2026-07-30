@@ -13,6 +13,7 @@ import 'package:orbitx/helper/database.dart';
 import 'package:orbitx/helper/frp_config.dart';
 import 'package:orbitx/helper/schedule_helper.dart';
 import 'package:orbitx/helper/variable_context.dart';
+import 'package:orbitx/models/proxies_model.dart';
 import 'package:orbitx/screens/apps_screen.dart';
 
 import 'package:orbitx/screens/map_screen.dart';
@@ -23,6 +24,7 @@ import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
 import 'package:orbitx/services/frp_service.dart';
 import 'package:orbitx/services/socket_service.dart';
+import 'package:orbitx/utils/tcp_utils.dart';
 import 'package:orbitx/vpn_controller.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
@@ -134,6 +136,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   bool showLay = false;
   bool isMaster = false;
   bool isFrps = false;
+  ProxyResponse locProxyResponse=ProxyResponse(proxies: List.empty());
+  ProxyResponse remProxyResponse=ProxyResponse(proxies: List.empty());
 
   String get currentRole => isMaster ? 'master' : 'slave';
 
@@ -360,13 +364,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               Positioned(
                 height: MediaQuery.of(context).size.shortestSide - 100,
                 width: MediaQuery.of(context).size.shortestSide - 100,
-                bottom: 100,
+                bottom: 70,
                 right: 50,
                 child: Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
-                    backgroundBlendMode: BlendMode.softLight,
+                    // backgroundBlendMode: BlendMode.difference,
                   ),
                   child: ListView(
                     children: [
@@ -544,24 +548,24 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             direction: DismissDirection.horizontal,
                             confirmDismiss: (direction) {
                               if (direction == DismissDirection.endToStart) {
-                                setState(() {
-                                  isMaster = true;
-                                });
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Role set to MASTER'),
-                                  ),
-                                );
+                                // setState(() {
+                                //   isMaster = true;
+                                // });
+                                // ScaffoldMessenger.of(context).showSnackBar(
+                                //   const SnackBar(
+                                //     content: Text('Role set to MASTER'),
+                                //   ),
+                                // );
                                 return Future.value(false);
                               } else {
-                                setState(() {
-                                  isMaster = false;
-                                });
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Role set to SLAVE'),
-                                  ),
-                                );
+                                // setState(() {
+                                //   isMaster = false;
+                                // });
+                                // ScaffoldMessenger.of(context).showSnackBar(
+                                //   const SnackBar(
+                                //     content: Text('Role set to SLAVE'),
+                                //   ),
+                                // );
                                 return Future.value(false);
                               }
                             },
@@ -641,6 +645,74 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             ),
                           ],
                         ),
+                      ),
+                      if(isFrps)  Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Local network'),
+                            IconButton(
+                              onPressed: !vpnEnabled ?null:(){
+                                getTcpProxies(isMaster? '10.0.0.1':'10.0.0.2').then((localResponse)=>{
+                                  if(mounted){
+                                  setState(() {
+                                  locProxyResponse=localResponse;
+                                  })
+                                  }
+                                });
+                              }, 
+                              icon: Icon(Icons.refresh)
+                            ),
+                          ],
+                        ),
+                      ),
+                      ...locProxyResponse.proxies.map((lpr)=>
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.call_made),
+                          title: Text("${lpr.conf.name} -> ${lpr.conf.remotePort}(${lpr.status})"),
+                          subtitle: Text("${lpr.name}${lpr.conf.type}(${lpr.lastCloseTime})"),
+                          trailing: Text(lpr.curConns.toString()),
+                        ),
+                      ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Remote Network'),
+                            IconButton(
+                              onPressed: !vpnEnabled ?null:(){
+                                getTcpProxies(isMaster? '10.0.0.2':'10.0.0.1').then((remoteResponse)=>{
+                                  if(mounted){
+                                  setState(() {
+                                  remProxyResponse=remoteResponse;
+                                  })
+                                  }
+                                });
+                              }, 
+                              icon: Icon(Icons.refresh)
+                            ),
+                          ],
+                        ),
+                      ),
+                      ...remProxyResponse.proxies.map((lpr)=>
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.call_received),
+                          title: Text("${lpr.conf.name} -> ${lpr.conf.remotePort}(${lpr.status})"),
+                          subtitle: Text("${lpr.name}${lpr.conf.type}(${lpr.lastCloseTime})"),
+                          trailing: Text(lpr.curConns.toString()),
+                        ),
+                      ),
                       ),
                     ],
                   ),

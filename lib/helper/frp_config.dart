@@ -121,6 +121,11 @@ class FrpsConfig {
     buffer.writeln('bindPort = $bindPort');
     if (vhostHttpPort != null) buffer.writeln('vhostHTTPPort = $vhostHttpPort');
     if (vhostHttpsPort != null) buffer.writeln('vhostHTTPSPort = $vhostHttpsPort');
+    // no need
+      buffer.writeln('webServer.addr = "0.0.0.0"');
+      buffer.writeln('webServer.port = 7500');
+      buffer.writeln('webServer.user = "admin"');
+      buffer.writeln('webServer.password = "password"');
     if (authToken != null && authToken!.isNotEmpty) {
       buffer.writeln('\n[auth]');
       buffer.writeln('method = "token"');
