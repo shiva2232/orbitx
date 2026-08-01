@@ -39,6 +39,7 @@ import (
 
 	"github.com/fatedier/frp/client"
 	"github.com/fatedier/frp/pkg/config"
+	"github.com/fatedier/frp/pkg/config/source"
 	"github.com/fatedier/frp/server"
 )
 
@@ -135,6 +136,7 @@ func StartFrpc(configContent string) error {
 		frpcMu.Unlock()
 		return fmt.Errorf("frpc is already running")
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	frpcCancel = cancel
 	frpcRunning = true
@@ -158,20 +160,34 @@ func StartFrpc(configContent string) error {
 	}
 	defer os.Remove(tmpPath)
 
-	svr, err := client.NewService(client.ServiceOptions{
-		ConfigFilePath: tmpPath,
+	commonCfg, proxyCfgs, visitorCfgs, _, err := config.LoadClientConfig(tmpPath, false)
+	if err != nil {
+		return err
+	}
+
+	cfgSource := source.NewConfigSource()
+	if err := cfgSource.ReplaceAll(proxyCfgs, visitorCfgs); err != nil {
+		return err
+	}
+
+	aggregator := source.NewAggregator(cfgSource)
+
+	svc, err := client.NewService(client.ServiceOptions{
+		Common:                 commonCfg,
+		ConfigSourceAggregator: aggregator,
+		ConfigFilePath:         tmpPath,
 	})
 	if err != nil {
 		return err
 	}
 
 	frpcMu.Lock()
-	frpcSvr = svr
+	frpcSvr = svc
 	frpcMu.Unlock()
 
 	logInfo("FRPC starting...")
-	svr.Run(ctx)
-	return nil
+
+	return svc.Run(ctx)
 }
 
 // --- JNI Exports ---
@@ -190,11 +206,18 @@ func Java_frpwrapper_Frpwrapper_init(env *C.JNIEnv, clazz C.jclass, cacheDir C.j
 //export Java_frpwrapper_Frpwrapper_startFrps
 func Java_frpwrapper_Frpwrapper_startFrps(env *C.JNIEnv, clazz C.jclass, config C.jstring) {
 	cStr := C.GetStringUTFChars(env, config, nil)
-	if cStr == nil { return }
+	if cStr == nil {
+		return
+	}
 	goConfig := C.GoString(cStr)
 	C.ReleaseStringUTFChars(env, config, cStr)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logError(fmt.Sprintf("PANIC in StartFrps: %v", r))
+			}
+		}()
 		if err := StartFrps(goConfig); err != nil {
 			logError(fmt.Sprintf("FRPS Fatal Error: %v", err))
 		}
@@ -217,11 +240,18 @@ func Java_frpwrapper_Frpwrapper_stopFrps(env *C.JNIEnv, clazz C.jclass) {
 //export Java_frpwrapper_Frpwrapper_startFrpc
 func Java_frpwrapper_Frpwrapper_startFrpc(env *C.JNIEnv, clazz C.jclass, config C.jstring) {
 	cStr := C.GetStringUTFChars(env, config, nil)
-	if cStr == nil { return }
+	if cStr == nil {
+		return
+	}
 	goConfig := C.GoString(cStr)
 	C.ReleaseStringUTFChars(env, config, cStr)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logError(fmt.Sprintf("PANIC in StartFrpc: %v", r))
+			}
+		}()
 		if err := StartFrpc(goConfig); err != nil {
 			logError(fmt.Sprintf("FRPC Fatal Error: %v", err))
 		}
@@ -245,7 +275,9 @@ func Java_frpwrapper_Frpwrapper_stopFrpc(env *C.JNIEnv, clazz C.jclass) {
 func Java_frpwrapper_Frpwrapper_isFrpsRunning(env *C.JNIEnv, clazz C.jclass) C.jboolean {
 	frpsMu.Lock()
 	defer frpsMu.Unlock()
-	if frpsRunning { return C.JNI_TRUE }
+	if frpsRunning {
+		return C.JNI_TRUE
+	}
 	return C.JNI_FALSE
 }
 
@@ -253,7 +285,9 @@ func Java_frpwrapper_Frpwrapper_isFrpsRunning(env *C.JNIEnv, clazz C.jclass) C.j
 func Java_frpwrapper_Frpwrapper_isFrpcRunning(env *C.JNIEnv, clazz C.jclass) C.jboolean {
 	frpcMu.Lock()
 	defer frpcMu.Unlock()
-	if frpcRunning { return C.JNI_TRUE }
+	if frpcRunning {
+		return C.JNI_TRUE
+	}
 	return C.JNI_FALSE
 }
 
@@ -261,7 +295,9 @@ func Java_frpwrapper_Frpwrapper_isFrpcRunning(env *C.JNIEnv, clazz C.jclass) C.j
 func Java_frpwrapper_Frpwrapper_checkPort(env *C.JNIEnv, clazz C.jclass, port C.jint) C.jboolean {
 	address := fmt.Sprintf("127.0.0.1:%d", int(port))
 	conn, err := net.DialTimeout("tcp", address, 200*time.Millisecond)
-	if err != nil { return C.JNI_FALSE }
+	if err != nil {
+		return C.JNI_FALSE
+	}
 	conn.Close()
 	return C.JNI_TRUE
 }

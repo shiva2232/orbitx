@@ -104,7 +104,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Orbit X',
-      theme: ThemeData(colorScheme: .fromSeed(seedColor: Colors.deepPurple)),
+      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple)),
       home: const MyHomePage(title: 'Orbit X'),
     );
   }
@@ -136,8 +136,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   bool showLay = false;
   bool isMaster = false;
   bool isFrps = false;
-  ProxyResponse locProxyResponse=ProxyResponse(proxies: List.empty());
-  ProxyResponse remProxyResponse=ProxyResponse(proxies: List.empty());
+  ProxyResponse locProxyResponse = ProxyResponse(proxies: []);
+  ProxyResponse remProxyResponse = ProxyResponse(proxies: []);
+  final List<InputItem> _items = [];
+  bool isFrpc=false;
 
   String get currentRole => isMaster ? 'master' : 'slave';
 
@@ -165,7 +167,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           blue: 0.5,
                         ),
                         child: Padding(
-                          padding: EdgeInsetsGeometry.all(5),
+                          padding: EdgeInsets.all(5),
                           child: TextField(
                             onChanged: (value) {
                               setState(() {
@@ -319,45 +321,18 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           },
                         ),
                       ),
-                      Slider(
-                        value: steps,
-                        label: String.fromCharCode(97 + steps.round()),
-                        onChanged: (step) {
-                          setState(() {
-                            steps = step;
-                          });
-                          final int index = apps.indexWhere(
-                            (app) => app.name.toLowerCase().startsWith(
-                              String.fromCharCode(97 + step.round()),
-                            ),
-                          );
-                          debugPrint(
-                            "$index $index $step ${index * width} $width",
-                          );
-                          if (index != -1) {
-                            scrollController.animateTo(
-                              index * width,
-                              duration: const Duration(milliseconds: 700),
-                              curve: Curves.easeOutCubic,
-                            );
-                          }
-                        },
-                        min: 0,
-                        max: 27,
-                        divisions: 27,
-                      ),
                     ],
                   ),
                 ),
                 Container(color: Colors.black, child: ScriptPage()),
                 WeatherScreen(),
-                Container(
-                  color: Colors.black,
-                  child: AppsScreen(apps: apps),
-                ),
-                Container(color: Colors.black, child: MapView()),
-                UtilPage(),
-                Container(color: Colors.black, child: Xterm()),
+                // Container(
+                //   color: Colors.black,
+                //   child: AppsScreen(apps: apps),
+                // ),
+                // Container(color: Colors.black, child: MapView()),
+                // UtilPage(),
+                // Container(color: Colors.black, child: Xterm()),
               ],
             ),
             if (showLay)
@@ -620,12 +595,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                   ? null
                                   : (val) {
                                       if (val) {
-                                        debugPrint(FrpsConfig(
-                                          authToken: "HRyz5HYfW9B7d6Z3",
-                                          bindAddr:
-                                          '0.0.0.0', // connect any network device.
-                                          bindPort: 7000,
-                                        ).toTomlString(),
+                                        debugPrint(
+                                          FrpsConfig(
+                                            authToken: "HRyz5HYfW9B7d6Z3",
+                                            bindAddr:
+                                                '0.0.0.0', // connect any network device.
+                                            bindPort: 7000,
+                                          ).toTomlString(),
                                         );
                                         FrpService.startFrps(
                                           FrpsConfig(
@@ -646,74 +622,231 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           ],
                         ),
                       ),
-                      if(isFrps)  Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Local network'),
-                            IconButton(
-                              onPressed: !vpnEnabled ?null:(){
-                                getTcpProxies(isMaster? '10.0.0.1':'10.0.0.2').then((localResponse)=>{
-                                  if(mounted){
-                                  setState(() {
-                                  locProxyResponse=localResponse;
-                                  })
-                                  }
-                                });
-                              }, 
-                              icon: Icon(Icons.refresh)
+
+                      if (isFrps) ...[
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Add Proxy'),
+                              IconButton(
+                                icon: Icon(Icons.add),
+                                onPressed: !vpnEnabled
+                                    ? null
+                                    : () {
+                                        showModalBottomSheet(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          backgroundColor: Colors.transparent,
+                                          builder: (ctx) => _AddItemBottomSheet(
+                                            onItemAdded: (name, address, port, proxyType) {
+                                              final la = address.split(':')[0];
+                                              final lp = int.parse(
+                                                address.split(':')[1],
+                                              );
+                                              void addProxy() {
+                                                
+                                                final frpcConfig = FrpcConfig(
+                                                    authToken:
+                                                        "HRyz5HYfW9B7d6Z3",
+                                                    serverAddr: isMaster
+                                                        ? '10.0.0.1'
+                                                        : '10.0.0.2',
+                                                    serverPort: 7000,
+                                                    proxies: [
+                                                      ..._items
+                                                          .map((e) {
+                                                            if (e.address ==
+                                                                    address &&
+                                                                e.port ==
+                                                                    port) {
+                                                              return null;
+                                                            }
+                                                            final la = e.address
+                                                                .split(':')[0];
+                                                            final lp =
+                                                                int.parse(
+                                                                  e.address
+                                                                      .split(
+                                                                        ':',
+                                                                      )[1],
+                                                                );
+                                                            return FrpProxyConfig(
+                                                              name: e.name,
+                                                              type: e.type,
+                                                              localIp: la,
+                                                              localPort: lp,
+                                                              remotePort:
+                                                                  e.port,
+                                                            );
+                                                          })
+                                                          .whereType<
+                                                            FrpProxyConfig
+                                                          >(),
+                                                      FrpProxyConfig(
+                                                        name: name,
+                                                        type: proxyType,
+                                                        localIp: la,
+                                                        localPort: lp,
+                                                        remotePort: port,
+                                                      ),
+                                                    ],
+                                                  ).toTomlString();
+                                                debugPrint(frpcConfig);
+                                                FrpService.startFrpc(
+                                                  frpcConfig,
+                                                ).then((value) {
+                                                  debugPrint(
+                                                    "Started frpc: $value",
+                                                  );
+                                                  debugPrint("1 prineted succesfully");
+                                                  // setState(() {
+                                                  //   _items.insert(
+                                                  //     0,
+                                                  //     InputItem(
+                                                  //       name: name,
+                                                  //       address: address,
+                                                  //       port: port,
+                                                  //       type: proxyType,
+                                                  //     ),
+                                                  //   );
+                                                  // });
+                                                  debugPrint("2 prineted succesfully");
+
+                                                  getTcpProxies(
+                                                    isMaster
+                                                        ? '10.0.0.1'
+                                                        : '10.0.0.2',
+                                                  ).then(
+                                                    (localResponse) => {
+                                                      if (mounted)
+                                                        {
+                                                          setState(() {
+                                                            locProxyResponse =
+                                                                localResponse;
+                                                          }),
+                                                        },
+                                                    },
+                                                  );
+                                                });
+                                              }
+                                              if(isFrpc){
+                                                FrpService.stopFrpc().then((str){
+                                                  addProxy();
+                                                });
+                                              }else{
+                                                addProxy();
+                                              }
+                                              // FrpService.stopFrpc().then((
+                                              //   value,
+                                              // ) {
+
+                                              // });
+                                            },
+                                          ),
+                                        );
+                                      },
+                              ),
+                            ],
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Local network'),
+                              IconButton(
+                                onPressed: !vpnEnabled
+                                    ? null
+                                    : () {
+                                        getTcpProxies(
+                                          isMaster ? '10.0.0.1' : '10.0.0.2',
+                                        ).then(
+                                          (localResponse) => {
+                                            if (mounted)
+                                              {
+                                                setState(() {
+                                                  locProxyResponse =
+                                                      localResponse;
+                                                }),
+                                              },
+                                          },
+                                        );
+                                      },
+                                icon: Icon(Icons.refresh),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ...locProxyResponse.proxies.map(
+                          (lpr) => Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(Icons.call_made),
+                              title: Text(
+                                "${lpr.conf.name} -> ${lpr.conf.remotePort}(${lpr.status})",
+                              ),
+                              subtitle: Text(
+                                "${lpr.name}${lpr.conf.type}(${lpr.lastCloseTime})",
+                              ),
+                              trailing: Text(lpr.curConns.toString()),
                             ),
-                          ],
+                          ),
                         ),
-                      ),
-                      ...locProxyResponse.proxies.map((lpr)=>
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.call_made),
-                          title: Text("${lpr.conf.name} -> ${lpr.conf.remotePort}(${lpr.status})"),
-                          subtitle: Text("${lpr.name}${lpr.conf.type}(${lpr.lastCloseTime})"),
-                          trailing: Text(lpr.curConns.toString()),
+                      ],
+                      if (vpnEnabled) ...[
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Remote Network'),
+                              IconButton(
+                                onPressed: !vpnEnabled
+                                    ? null
+                                    : () {
+                                        getTcpProxies(
+                                          isMaster ? '10.0.0.2' : '10.0.0.1',
+                                        ).then(
+                                          (remoteResponse) => {
+                                            if (mounted)
+                                              {
+                                                setState(() {
+                                                  remProxyResponse =
+                                                      remoteResponse;
+                                                }),
+                                              },
+                                          },
+                                        );
+                                      },
+                                icon: Icon(Icons.refresh),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Remote Network'),
-                            IconButton(
-                              onPressed: !vpnEnabled ?null:(){
-                                getTcpProxies(isMaster? '10.0.0.2':'10.0.0.1').then((remoteResponse)=>{
-                                  if(mounted){
-                                  setState(() {
-                                  remProxyResponse=remoteResponse;
-                                  })
-                                  }
-                                });
-                              }, 
-                              icon: Icon(Icons.refresh)
+                        ...remProxyResponse.proxies.map(
+                          (lpr) => Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(Icons.call_received),
+                              title: Text(
+                                "${lpr.conf.name} -> ${lpr.conf.remotePort}(${lpr.status})",
+                              ),
+                              subtitle: Text(
+                                "${lpr.name}${lpr.conf.type}(${lpr.lastCloseTime})",
+                              ),
+                              trailing: Text(lpr.curConns.toString()),
                             ),
-                          ],
+                          ),
                         ),
-                      ),
-                      ...remProxyResponse.proxies.map((lpr)=>
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.call_received),
-                          title: Text("${lpr.conf.name} -> ${lpr.conf.remotePort}(${lpr.status})"),
-                          subtitle: Text("${lpr.name}${lpr.conf.type}(${lpr.lastCloseTime})"),
-                          trailing: Text(lpr.curConns.toString()),
-                        ),
-                      ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -878,4 +1011,218 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
     return {"result": ok, "isAdd": !already};
   }
+}
+
+// Bottom Sheet Widget Separation for clean architecture
+class _AddItemBottomSheet extends StatefulWidget {
+  final Function(String, String, int, ProxyType) onItemAdded;
+
+  const _AddItemBottomSheet({required this.onItemAdded});
+
+  @override
+  State<_AddItemBottomSheet> createState() => _AddItemBottomSheetState();
+}
+
+class _AddItemBottomSheetState extends State<_AddItemBottomSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _addressController = TextEditingController();
+  final _portController = TextEditingController();
+  ProxyType _selectedProxyType = ProxyType.tcp;
+  final _nameController = TextEditingController();
+
+  void _submitData() {
+    if (_formKey.currentState!.validate()) {
+      final enteredAddress = _addressController.text;
+      final enteredName = _nameController.text;
+      final enteredPort = int.parse(_portController.text);
+
+      widget.onItemAdded(
+        enteredName,
+        enteredAddress,
+        enteredPort,
+        _selectedProxyType,
+      );
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _addressController.dispose();
+    _portController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(28),
+            topRight: Radius.circular(28),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Add New Entry',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1E293B),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _nameController,
+                decoration: InputDecoration(
+                  labelText: 'Server Name',
+                  prefixIcon: const Icon(Icons.attach_money, size: 20),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter a server name';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _addressController,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  labelText: '192.168.0.44:8080',
+                  prefixIcon: const Icon(Icons.title, size: 20),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null ||
+                      value.trim().isEmpty ||
+                      !value.contains(':')) {
+                    return 'e.g., 192.168.0.44:8080';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _portController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'Port',
+                  prefixIcon: const Icon(Icons.attach_money, size: 20),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null ||
+                      value.isEmpty ||
+                      int.tryParse(value) == null) {
+                    return 'Please enter a port number';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<ProxyType>(
+                value: ProxyType.tcp,
+                hint: const Text('Select Proxy Type'),
+                items: ProxyType.values.map((ProxyType type) {
+                  return DropdownMenuItem<ProxyType>(
+                    value: type,
+                    child: Text(type.toString().split('.').last.toUpperCase()),
+                  );
+                }).toList(),
+                validator: (value) {
+                  if (value == null) {
+                    return 'Please select a proxy type';
+                  }
+                  return null;
+                },
+                onChanged: (ProxyType? newValue) {
+                  setState(() {
+                    _selectedProxyType = newValue!;
+                  });
+                },
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _submitData,
+                icon: const Icon(Icons.add_circle_outline, size: 20),
+                label: const Text(
+                  'Add to List',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Color(0xFF6366F1),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Data model to store our entries
+class InputItem {
+  final String name;
+  final ProxyType type;
+  final String address;
+  final int port;
+
+  InputItem({
+    required this.name,
+    required this.address,
+    required this.port,
+    required this.type,
+  });
 }
