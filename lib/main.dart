@@ -104,7 +104,9 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Orbit X',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple)),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+      ),
       home: const MyHomePage(title: 'Orbit X'),
     );
   }
@@ -139,7 +141,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   ProxyResponse locProxyResponse = ProxyResponse(proxies: []);
   ProxyResponse remProxyResponse = ProxyResponse(proxies: []);
   final List<InputItem> _items = [];
-  bool isFrpc=false;
+  bool isFrpc = false;
 
   String get currentRole => isMaster ? 'master' : 'slave';
 
@@ -647,53 +649,50 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                                 address.split(':')[1],
                                               );
                                               void addProxy() {
-                                                
                                                 final frpcConfig = FrpcConfig(
-                                                    authToken:
-                                                        "HRyz5HYfW9B7d6Z3",
-                                                    serverAddr: isMaster
-                                                        ? '10.0.0.1'
-                                                        : '10.0.0.2',
-                                                    serverPort: 7000,
-                                                    proxies: [
-                                                      ..._items
-                                                          .map((e) {
-                                                            if (e.address ==
-                                                                    address &&
-                                                                e.port ==
-                                                                    port) {
-                                                              return null;
-                                                            }
-                                                            final la = e.address
-                                                                .split(':')[0];
-                                                            final lp =
-                                                                int.parse(
-                                                                  e.address
-                                                                      .split(
-                                                                        ':',
-                                                                      )[1],
-                                                                );
-                                                            return FrpProxyConfig(
-                                                              name: e.name,
-                                                              type: e.type,
-                                                              localIp: la,
-                                                              localPort: lp,
-                                                              remotePort:
-                                                                  e.port,
-                                                            );
-                                                          })
-                                                          .whereType<
-                                                            FrpProxyConfig
-                                                          >(),
-                                                      FrpProxyConfig(
-                                                        name: name,
-                                                        type: proxyType,
+                                                  authToken: "HRyz5HYfW9B7d6Z3",
+                                                  serverAddr: isMaster
+                                                      ? '10.0.0.1'
+                                                      : '10.0.0.2',
+                                                  serverPort: 7000,
+                                                  proxies: [
+                                                    ..._items.map((e) {
+                                                      if (e.address ==
+                                                              address &&
+                                                          e.port == port) {
+                                                        ScaffoldMessenger.of(
+                                                          context,
+                                                        ).showSnackBar(
+                                                          const SnackBar(
+                                                            content: Text(
+                                                              "Port already in use.",
+                                                            ),
+                                                          ),
+                                                        );
+                                                        return null;
+                                                      }
+                                                      final la = e.address
+                                                          .split(':')[0];
+                                                      final lp = int.parse(
+                                                        e.address.split(':')[1],
+                                                      );
+                                                      return FrpProxyConfig(
+                                                        name: e.name,
+                                                        type: e.type,
                                                         localIp: la,
                                                         localPort: lp,
-                                                        remotePort: port,
-                                                      ),
-                                                    ],
-                                                  ).toTomlString();
+                                                        remotePort: e.port,
+                                                      );
+                                                    }).whereType<FrpProxyConfig>(),
+                                                    FrpProxyConfig(
+                                                      name: name,
+                                                      type: proxyType,
+                                                      localIp: la,
+                                                      localPort: lp,
+                                                      remotePort: port,
+                                                    ),
+                                                  ],
+                                                ).toTomlString();
                                                 debugPrint(frpcConfig);
                                                 FrpService.startFrpc(
                                                   frpcConfig,
@@ -701,19 +700,17 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                                   debugPrint(
                                                     "Started frpc: $value",
                                                   );
-                                                  debugPrint("1 prineted succesfully");
-                                                  // setState(() {
-                                                  //   _items.insert(
-                                                  //     0,
-                                                  //     InputItem(
-                                                  //       name: name,
-                                                  //       address: address,
-                                                  //       port: port,
-                                                  //       type: proxyType,
-                                                  //     ),
-                                                  //   );
-                                                  // });
-                                                  debugPrint("2 prineted succesfully");
+                                                  setState(() {
+                                                    _items.insert(
+                                                      0,
+                                                      InputItem(
+                                                        name: name,
+                                                        address: address,
+                                                        port: port,
+                                                        type: proxyType,
+                                                      ),
+                                                    );
+                                                  });
 
                                                   getTcpProxies(
                                                     isMaster
@@ -732,18 +729,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                                   );
                                                 });
                                               }
-                                              if(isFrpc){
-                                                FrpService.stopFrpc().then((str){
+
+                                              if (isFrpc) {
+                                                FrpService.stopFrpc().then((
+                                                  str,
+                                                ) {
                                                   addProxy();
                                                 });
-                                              }else{
+                                              } else {
                                                 addProxy();
                                               }
-                                              // FrpService.stopFrpc().then((
-                                              //   value,
-                                              // ) {
-
-                                              // });
                                             },
                                           ),
                                         );
