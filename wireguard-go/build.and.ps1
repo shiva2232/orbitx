@@ -1,33 +1,48 @@
 # ===== CONFIG =====
 $ErrorActionPreference = "Stop"
+
 $NDK = "C:\Users\vsiva\AppData\Local\Android\Sdk\ndk\28.2.13676358"
 $API = "23"
 $BASE_TOOLCHAIN = "$NDK\toolchains\llvm\prebuilt\windows-x86_64\bin"
 
-function Build-Arch($arch, $target, $folder) {
-    Write-Host "`n--- Building for $arch ($folder) ---"
+function Build-Arch($goarch, $target, $folder) {
+    Write-Host "`n--- Building for $folder ---"
+
     $env:GOOS = "android"
-    $env:GOARCH = $arch
+    $env:GOARCH = $goarch
     $env:CGO_ENABLED = "1"
-    # Force module mode to use the local go.mod
     $env:GO111MODULE = "on"
     $env:CC = "$BASE_TOOLCHAIN\$target$API-clang.cmd"
 
-    # Build only the JNI-enabled vpnengine source (vpnengine.go contains the cgo preamble)
-    # Use verbose output to help diagnose cross-compile issues.
     go build -v -buildmode=c-shared -o libvpnengine.so .
-    
+
     $dest = "../android/app/src/main/jniLibs/$folder"
-    if (!(Test-Path $dest)) { New-Item -ItemType Directory -Force $dest }
-    Move-Item libvpnengine.so "$dest/libvpnengine.so" -Force
-    # Clean up the generated header
-    if (Test-Path libvpnengine.h) { Remove-Item libvpnengine.h }
+
+    if (!(Test-Path $dest)) {
+        New-Item -ItemType Directory -Force $dest | Out-Null
+    }
+
+    Copy-Item libvpnengine.so "$dest/libvpnengine.so" -Force
+
+    if (Test-Path libvpnengine.h) {
+        Remove-Item libvpnengine.h
+    }
+
+    Remove-Item libvpnengine.so -Force
 }
 
-# 1. Build for ARM64 (Physical Devices)
+# ===== Build Targets =====
+
+# ARM 32-bit (armeabi-v7a)
+Build-Arch "arm" "armv7a-linux-androideabi" "armeabi-v7a"
+
+# ARM 64-bit (arm64-v8a)
 Build-Arch "arm64" "aarch64-linux-android" "arm64-v8a"
 
-# 2. Build for x86_64 (Standard Windows Emulators)
+# x86_64 Emulator
 Build-Arch "amd64" "x86_64-linux-android" "x86_64"
 
-Write-Host "`nBuild Finished! All architectures deployed to jniLibs."
+Write-Host ""
+Write-Host "======================================="
+Write-Host " Build completed successfully!"
+Write-Host "======================================="

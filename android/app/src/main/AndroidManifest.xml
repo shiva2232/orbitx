@@ -69,7 +69,6 @@
         <activity
             android:name=".VpnPermissionActivity"
             android:exported="false" />
-        <receiver android:name=".NetworkChangeReceiver" android:exported="false" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

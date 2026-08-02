@@ -14,13 +14,13 @@ import 'package:orbitx/helper/frp_config.dart';
 import 'package:orbitx/helper/schedule_helper.dart';
 import 'package:orbitx/helper/variable_context.dart';
 import 'package:orbitx/models/proxies_model.dart';
-import 'package:orbitx/screens/apps_screen.dart';
+// import 'package:orbitx/screens/apps_screen.dart';
 
-import 'package:orbitx/screens/map_screen.dart';
-import 'package:orbitx/screens/script_screen.dart';
-import 'package:orbitx/screens/terminal_screen.dart';
-import 'package:orbitx/screens/utils_screen.dart';
-import 'package:orbitx/screens/weather_screen.dart';
+// import 'package:orbitx/screens/map_screen.dart';
+// import 'package:orbitx/screens/script_screen.dart';
+// import 'package:orbitx/screens/terminal_screen.dart';
+// import 'package:orbitx/screens/utils_screen.dart';
+// import 'package:orbitx/screens/weather_screen.dart';
 import 'package:orbitx/services/action_service.dart';
 import 'package:orbitx/services/frp_service.dart';
 import 'package:orbitx/services/socket_service.dart';
@@ -29,69 +29,9 @@ import 'package:orbitx/vpn_controller.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
 import 'package:uuid/validation.dart';
-import 'package:workmanager/workmanager.dart';
-
-@pragma('vm:entry-point')
-void onStart(ServiceInstance service) async {
-  DartPluginRegistrant.ensureInitialized();
-
-  Timer.periodic(const Duration(seconds: 10), (timer) async {
-    if (service is AndroidServiceInstance) {
-      service.setForegroundNotificationInfo(
-        title: "Orbit X",
-        content: "SMART MODE is On",
-      );
-      service.on("stopService").listen((event) {
-        service.stopSelf();
-      });
-    }
-  });
-}
-
-@pragma('vm:entry-point')
-void callbackDispatcher() {
-  Workmanager().executeTask((task, inputData) async {
-    final instance = DatabaseHelper.instance;
-    await instance.initialize();
-    final rules = await instance.loadAll();
-
-    final now = DateTime.now();
-    for (final rule in rules) {
-      if (ScheduleEvaluator.shouldRunNow(rule, now)) {
-        print("Run automation: ${rule.name}");
-
-        await AutomationEngine.run(rule, AutomationContext({}));
-      }
-    }
-
-    return Future.value(true);
-  });
-}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  await FlutterBackgroundService().configure(
-    androidConfiguration: AndroidConfiguration(
-      onStart: onStart,
-      autoStart: true,
-      isForegroundMode: true,
-      foregroundServiceNotificationId: 100,
-      initialNotificationTitle: 'OrbitX',
-      initialNotificationContent: 'Running',
-    ),
-    iosConfiguration: IosConfiguration(),
-  );
-
-  await Workmanager().initialize(callbackDispatcher, isInDebugMode: true);
-  Workmanager().registerPeriodicTask(
-    "automation-engine",
-    "automation-engine",
-    frequency: const Duration(minutes: 15),
-  );
-  //   SystemChrome.setEnabledSystemUIMode(
-  //   SystemUiMode.edgeToEdge,
-  // );
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   runApp(const MyApp());
 }
@@ -326,8 +266,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     ],
                   ),
                 ),
-                Container(color: Colors.black, child: ScriptPage()),
-                WeatherScreen(),
+                // Container(color: Colors.black, child: ScriptPage()),
+                // WeatherScreen(),
                 // Container(
                 //   color: Colors.black,
                 //   child: AppsScreen(apps: apps),
@@ -549,7 +489,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             child: ListTile(
                               textColor: Colors.blue,
                               title: Text('SMART MODE'),
-                              subtitle: Text(isMaster ? 'MASTER' : 'SLAVE'),
+                              subtitle: Text(isMaster ? 'Server' : 'Client'),
                               onTap: () {
                                 Permission.notification.isGranted.then((value) {
                                   if (value) {
