@@ -535,7 +535,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                               value: isFrps,
                               onChanged: !vpnEnabled
                                   ? null
-                                  : (val) {
+                                  : (val) async {
                                       if (val) {
                                         debugPrint(
                                           FrpsConfig(
@@ -545,7 +545,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                             bindPort: 7000,
                                           ).toTomlString(),
                                         );
-                                        FrpService.startFrps(
+                                        await FrpService.startFrps(
                                           FrpsConfig(
                                             authToken: "HRyz5HYfW9B7d6Z3",
                                             bindAddr:
@@ -554,7 +554,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                           ).toTomlString(),
                                         );
                                       } else {
-                                        FrpService.stopFrps();
+                                        await FrpService.stopFrpc();
+                                        await FrpService.stopFrps();
+                                        setState(() {
+                                          isFrpc = false;
+                                        });
                                       }
                                       setState(() {
                                         isFrps = val;
@@ -583,64 +587,72 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                           isScrollControlled: true,
                                           backgroundColor: Colors.transparent,
                                           builder: (ctx) => _AddItemBottomSheet(
-                                            onItemAdded: (name, address, port, proxyType) {
+                                            onItemAdded: (name, address, port, proxyType) async {
                                               final la = address.split(':')[0];
                                               final lp = int.parse(
                                                 address.split(':')[1],
                                               );
-                                              void addProxy() {
-                                                final frpcConfig = FrpcConfig(
-                                                  authToken: "HRyz5HYfW9B7d6Z3",
-                                                  serverAddr: isMaster
-                                                      ? '10.0.0.1'
-                                                      : '10.0.0.2',
-                                                  serverPort: 7000,
-                                                  proxies: [
-                                                    ..._items.map((e) {
-                                                      if (e.address ==
-                                                              address &&
-                                                          e.port == port) {
-                                                        ScaffoldMessenger.of(
-                                                          context,
-                                                        ).showSnackBar(
-                                                          const SnackBar(
-                                                            content: Text(
-                                                              "Port already in use.",
-                                                            ),
+
+                                              // Always stop existing frpc before starting with new config
+                                              await FrpService.stopFrpc();
+
+                                              final frpcConfig = FrpcConfig(
+                                                authToken: "HRyz5HYfW9B7d6Z3",
+                                                serverAddr: isMaster
+                                                    ? '10.0.0.1'
+                                                    : '10.0.0.2',
+                                                serverPort: 7000,
+                                                proxies: [
+                                                  ..._items.map((e) {
+                                                    if (e.address ==
+                                                            address &&
+                                                        e.port == port) {
+                                                      ScaffoldMessenger.of(
+                                                        context,
+                                                      ).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            "Port already in use.",
                                                           ),
-                                                        );
-                                                        return null;
-                                                      }
-                                                      final la = e.address
-                                                          .split(':')[0];
-                                                      final lp = int.parse(
-                                                        e.address.split(':')[1],
+                                                        ),
                                                       );
-                                                      return FrpProxyConfig(
-                                                        name: e.name,
-                                                        type: e.type,
-                                                        localIp: la,
-                                                        localPort: lp,
-                                                        remotePort: e.port,
-                                                      );
-                                                    }).whereType<FrpProxyConfig>(),
-                                                    FrpProxyConfig(
-                                                      name: name,
-                                                      type: proxyType,
+                                                      return null;
+                                                    }
+                                                    final la = e.address
+                                                        .split(':')[0];
+                                                    final lp = int.parse(
+                                                      e.address.split(':')[1],
+                                                    );
+                                                    return FrpProxyConfig(
+                                                      name: e.name,
+                                                      type: e.type,
                                                       localIp: la,
                                                       localPort: lp,
-                                                      remotePort: port,
-                                                    ),
-                                                  ],
-                                                ).toTomlString();
-                                                debugPrint(frpcConfig);
-                                                FrpService.startFrpc(
-                                                  frpcConfig,
-                                                ).then((value) {
-                                                  debugPrint(
-                                                    "Started frpc: $value",
-                                                  );
+                                                      remotePort: e.port,
+                                                    );
+                                                  }).whereType<FrpProxyConfig>(),
+                                                  FrpProxyConfig(
+                                                    name: name,
+                                                    type: proxyType,
+                                                    localIp: la,
+                                                    localPort: lp,
+                                                    remotePort: port,
+                                                  ),
+                                                ],
+                                              ).toTomlString();
+
+                                              debugPrint(frpcConfig);
+                                              try {
+                                                final result = await FrpService.startFrpc(frpcConfig);
+                                                debugPrint("Started frpc: $result");
+
+                                                final localResponse = await getTcpProxies(
+                                                  isMaster ? '10.0.0.1' : '10.0.0.2',
+                                                );
+
+                                                if (mounted) {
                                                   setState(() {
+                                                    isFrpc = true;
                                                     _items.insert(
                                                       0,
                                                       InputItem(
@@ -650,34 +662,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                                         type: proxyType,
                                                       ),
                                                     );
+                                                    locProxyResponse = localResponse;
                                                   });
-
-                                                  getTcpProxies(
-                                                    isMaster
-                                                        ? '10.0.0.1'
-                                                        : '10.0.0.2',
-                                                  ).then(
-                                                    (localResponse) => {
-                                                      if (mounted)
-                                                        {
-                                                          setState(() {
-                                                            locProxyResponse =
-                                                                localResponse;
-                                                          }),
-                                                        },
-                                                    },
+                                                }
+                                              } catch (e) {
+                                                debugPrint("Error starting frpc: $e");
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    SnackBar(content: Text(e.toString())),
                                                   );
-                                                });
-                                              }
-
-                                              if (isFrpc) {
-                                                FrpService.stopFrpc().then((
-                                                  str,
-                                                ) {
-                                                  addProxy();
-                                                });
-                                              } else {
-                                                addProxy();
+                                                }
                                               }
                                             },
                                           ),
@@ -950,7 +944,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
 // Bottom Sheet Widget Separation for clean architecture
 class _AddItemBottomSheet extends StatefulWidget {
-  final Function(String, String, int, ProxyType) onItemAdded;
+  final Future<void> Function(String, String, int, ProxyType) onItemAdded;
 
   const _AddItemBottomSheet({required this.onItemAdded});
 
@@ -985,6 +979,7 @@ class _AddItemBottomSheetState extends State<_AddItemBottomSheet> {
   void dispose() {
     _addressController.dispose();
     _portController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
@@ -1033,7 +1028,7 @@ class _AddItemBottomSheetState extends State<_AddItemBottomSheet> {
                 controller: _nameController,
                 decoration: InputDecoration(
                   labelText: 'Server Name',
-                  prefixIcon: const Icon(Icons.attach_money, size: 20),
+                  prefixIcon: const Icon(Icons.label, size: 20),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -1055,7 +1050,7 @@ class _AddItemBottomSheetState extends State<_AddItemBottomSheet> {
                 textCapitalization: TextCapitalization.sentences,
                 decoration: InputDecoration(
                   labelText: '192.168.0.44:8080',
-                  prefixIcon: const Icon(Icons.title, size: 20),
+                  prefixIcon: const Icon(Icons.link, size: 20),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -1081,7 +1076,7 @@ class _AddItemBottomSheetState extends State<_AddItemBottomSheet> {
                 ),
                 decoration: InputDecoration(
                   labelText: 'Port',
-                  prefixIcon: const Icon(Icons.attach_money, size: 20),
+                  prefixIcon: const Icon(Icons.tag, size: 20),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),

@@ -48,11 +48,13 @@ var (
 	frpsMu      sync.Mutex
 	frpsRunning bool
 	frpsSvr     *server.Service
+	frpsWG      sync.WaitGroup
 
 	frpcCancel  context.CancelFunc
 	frpcMu      sync.Mutex
 	frpcRunning bool
 	frpcSvr     *client.Service
+	frpcWG      sync.WaitGroup
 
 	workDir string
 	logOnce sync.Once
@@ -91,6 +93,7 @@ func StartFrps(configContent string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	frpsCancel = cancel
 	frpsRunning = true
+	frpsWG.Add(1)
 	frpsMu.Unlock()
 
 	defer func() {
@@ -99,6 +102,7 @@ func StartFrps(configContent string) error {
 		frpsRunning = false
 		frpsSvr = nil
 		frpsMu.Unlock()
+		frpsWG.Done()
 	}()
 
 	if workDir == "" {
@@ -140,6 +144,7 @@ func StartFrpc(configContent string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	frpcCancel = cancel
 	frpcRunning = true
+	frpcWG.Add(1)
 	frpcMu.Unlock()
 
 	defer func() {
@@ -148,6 +153,7 @@ func StartFrpc(configContent string) error {
 		frpcRunning = false
 		frpcSvr = nil
 		frpcMu.Unlock()
+		frpcWG.Done()
 	}()
 
 	if workDir == "" {
@@ -235,6 +241,7 @@ func Java_frpwrapper_Frpwrapper_stopFrps(env *C.JNIEnv, clazz C.jclass) {
 		frpsSvr.Close()
 	}
 	frpsMu.Unlock()
+	frpsWG.Wait()
 }
 
 //export Java_frpwrapper_Frpwrapper_startFrpc
@@ -269,6 +276,7 @@ func Java_frpwrapper_Frpwrapper_stopFrpc(env *C.JNIEnv, clazz C.jclass) {
 		frpcSvr.Close()
 	}
 	frpcMu.Unlock()
+	frpcWG.Wait()
 }
 
 //export Java_frpwrapper_Frpwrapper_isFrpsRunning
