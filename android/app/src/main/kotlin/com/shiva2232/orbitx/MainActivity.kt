@@ -21,6 +21,7 @@ import android.net.NetworkRequest
 import frpwrapper.Frpwrapper
 import kotlin.concurrent.thread
 import kotlinx.coroutines.cancel
+import android.view.WindowManager
 
 class MainActivity : FlutterActivity() {
     private val scope = MainScope()
@@ -58,6 +59,22 @@ class MainActivity : FlutterActivity() {
             Log.e("MainActivity", "Failed to initialize FRP Native: ${e.message}")
         }
 
+        // lockscreen activity
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+            )
+        }
+
+        
+        handleLockscreenIntent(intent)
+        // above lock screen activity
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         val filter1 = IntentFilter(TUN_READY_ACTION)
@@ -69,6 +86,23 @@ class MainActivity : FlutterActivity() {
         } else {
             registerReceiver(tunReadyReceiver, filter1)
             registerReceiver(connectionReceiver, filter2)
+        }
+    }
+
+        // This triggers when the app is already open/running in the background
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleLockscreenIntent(intent)
+        
+        // Tell Flutter to navigate to the new initial route if the engine is already warm
+        if (intent.getBooleanExtra("launched_from_lockscreen", false)) {
+            flutterEngine?.navigationChannel?.pushRoute("/lockscreen")
+        }
+    }
+
+    private fun handleLockscreenIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("launched_from_lockscreen", false) == true) {
+            intent.putExtra("route", "/lockscreen")
         }
     }
 

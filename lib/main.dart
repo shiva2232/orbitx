@@ -15,6 +15,7 @@ import 'package:orbitx/helper/frp_config.dart';
 import 'package:orbitx/helper/schedule_helper.dart';
 import 'package:orbitx/helper/variable_context.dart';
 import 'package:orbitx/models/proxies_model.dart';
+import 'package:orbitx/screens/lock_screen.dart';
 import 'package:orbitx/screens/settings_screen.dart';
 // import 'package:orbitx/screens/apps_screen.dart';
 
@@ -51,7 +52,12 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Orbit X'),
+      // home: const MyHomePage(title: 'Orbit X'),
+      initialRoute: WidgetsBinding.instance.platformDispatcher.defaultRouteName,
+      routes: {
+        '/': (context) => const MyHomePage(title: 'Orbit X'), // Normal app home
+        '/lockscreen': (context) => const LockScreenPage(), // Lockscreen only
+      },
     );
   }
 }
@@ -513,12 +519,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                         MediaQuery.of(
                                               context,
                                             ).size.shortestSide /
-                                            16,
+                                            50,
                                       ),
                                       child: Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceEvenly,
-                                        spacing: 20,
+                                        spacing: MediaQuery.of(context).size.shortestSide*0.01,
                                         children: [
                                           Card(
                                             color: Colors.white,
@@ -550,7 +556,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                                           ? '10.0.0.1'
                                                           : '10.0.0.2',
                                                       style: TextStyle(
-                                                        fontSize: 16,
+                                                        fontSize: 12,
                                                         color: Color(
                                                           0xFF191C1E,
                                                         ),
@@ -591,7 +597,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                                           ? '10.0.0.2'
                                                           : '10.0.0.1',
                                                       style: TextStyle(
-                                                        fontSize: 16,
+                                                        fontSize: 12,
                                                         color: Color(
                                                           0xFF191C1E,
                                                         ),
@@ -665,6 +671,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                             await FrpService.stopFrps();
                                             setState(() {
                                               isFrpc = false;
+                                              _items.clear();
+                                              locProxyResponse=ProxyResponse(proxies: []);
+                                              remProxyResponse=ProxyResponse(proxies: []);
                                             });
                                           }
                                           setState(() {
@@ -862,7 +871,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                   "${lpr.conf.name} -> ${lpr.conf.remotePort}(${lpr.status})",
                                 ),
                                 subtitle: Text(
-                                  "${lpr.name}${lpr.conf.type}(${lpr.lastCloseTime})",
+                                  "${lpr.name}-${lpr.conf.type}(${lpr.lastCloseTime})",
                                 ),
                                 trailing: Padding(
                                   padding: const EdgeInsets.only(right: 16.0),
@@ -924,7 +933,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                   "${lpr.conf.name} -> ${lpr.conf.remotePort}(${lpr.status})",
                                 ),
                                 subtitle: Text(
-                                  "${lpr.name}${lpr.conf.type}(${lpr.lastCloseTime})",
+                                  "${lpr.name}-${lpr.conf.type}(${lpr.lastCloseTime})",
                                 ),
                                 trailing: Padding(
                                   padding: const EdgeInsets.only(right: 16.0),
