@@ -127,10 +127,10 @@ func (k *KeyUtils) StartVPNShared(ctx context.Context, sendStun func([]byte) err
 				return
 			}
 
-			// Normalized role for consistency
-			role := "peer"
+			// Match the Android Firebase role names.
+			role := "slave"
 			if k.isHost {
-				role = "host"
+				role = "master"
 			}
 
 			// FIX: Changed path from "peers" to "pairings"
@@ -180,9 +180,9 @@ func (k *KeyUtils) Rerun() {
 }
 
 func (k *KeyUtils) StartPeerListener(ctx context.Context) {
-	role := "host"
+	role := "master"
 	if k.isHost {
-		role = "peer"
+		role = "slave"
 	}
 
 	// FIX: Changed path from "peers" to "pairings"
@@ -235,17 +235,25 @@ func (k *KeyUtils) GetStunClient() *stun.StunClient {
 }
 
 func getString(m map[string]interface{}, key string) string {
-	if v, ok := m[key].(string); ok { return v }
+	if v, ok := m[key].(string); ok {
+		return v
+	}
 	return ""
 }
 
 func getInt(m map[string]interface{}, key string) int {
-	if v, ok := m[key].(float64); ok { return int(v) }
-	if v, ok := m[key].(int); ok { return v }
+	if v, ok := m[key].(float64); ok {
+		return int(v)
+	}
+	if v, ok := m[key].(int); ok {
+		return v
+	}
 	return 0
 }
 
 func getBool(m map[string]interface{}, key string) bool {
-	if v, ok := m[key].(bool); ok { return v }
+	if v, ok := m[key].(bool); ok {
+		return v
+	}
 	return false
 }

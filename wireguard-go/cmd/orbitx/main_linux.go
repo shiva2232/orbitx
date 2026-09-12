@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -67,6 +68,14 @@ func main() {
 		fatal(fmt.Errorf("create TUN interface %q: %w (run as root or grant CAP_NET_ADMIN)", interfaceName, err))
 	}
 	defer tunDevice.Close()
+
+	internalIP := "10.0.0.2"
+	if isHost {
+		internalIP = "10.0.0.1"
+	}
+	if err := configureLinuxInterface(interfaceName, internalIP); err != nil {
+		fatal(err)
+	}
 
 	bind := conn.NewDefaultBind()
 	stdBind, ok := bind.(*conn.StdNetBind)
@@ -131,6 +140,21 @@ func modeIsHost(mode string) (bool, error) {
 	default:
 		return false, fmt.Errorf("invalid mode %q: use -m server or -m client", mode)
 	}
+}
+
+func configureLinuxInterface(interfaceName, internalIP string) error {
+	commands := [][]string{
+		{"addr", "replace", internalIP + "/24", "dev", interfaceName},
+		{"link", "set", "dev", interfaceName, "up"},
+		{"route", "replace", "10.0.0.0/24", "dev", interfaceName},
+	}
+	for _, args := range commands {
+		output, err := exec.Command("ip", args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("configure TUN interface %q with ip %v: %w: %s", interfaceName, args, err, output)
+		}
+	}
+	return nil
 }
 
 func envOrDefault(name, fallback string) string {
