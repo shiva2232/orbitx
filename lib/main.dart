@@ -16,6 +16,7 @@ import 'package:orbitx/helper/schedule_helper.dart';
 import 'package:orbitx/helper/variable_context.dart';
 import 'package:orbitx/models/proxies_model.dart';
 import 'package:orbitx/screens/lock_screen.dart';
+import 'package:orbitx/screens/power_present_screen.dart';
 import 'package:orbitx/screens/settings_screen.dart';
 // import 'package:orbitx/screens/apps_screen.dart';
 
@@ -57,6 +58,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/': (context) => const MyHomePage(title: 'Orbit X'), // Normal app home
         '/lockscreen': (context) => const LockScreenPage(), // Lockscreen only
+        '/present': (context) => const PowerPresentPage(),
       },
     );
   }
@@ -951,15 +953,20 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
+      floatingActionButton: GestureDetector(
+        onLongPress: () {
           setState(() {
             showLay = !showLay;
           });
         },
-        mini: true,
-        tooltip: 'Activate SMART',
-        child: const Icon(Icons.auto_awesome),
+        child: FloatingActionButton(
+          onPressed: () async {
+            Navigator.of(context).pushNamed('/present');
+          },
+          mini: true,
+          tooltip: 'Open Power Present',
+          child: const Icon(Icons.present_to_all),
+        ),
       ),
     );
   }

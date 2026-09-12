@@ -78,3 +78,19 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+val buildPowerPresentSo by tasks.registering(org.gradle.api.tasks.Exec::class) {
+    description = "Build Power Present Android shared library"
+    group = "build"
+    val scriptFile = file("$projectDir/../../power_present/build.android.ps1")
+    workingDir = file("$projectDir/../../power_present")
+    if (System.getProperty("os.name").lowercase().contains("windows")) {
+        commandLine("powershell", "-ExecutionPolicy", "Bypass", "-File", scriptFile.absolutePath)
+    } else {
+        commandLine("bash", scriptFile.absolutePath)
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(buildPowerPresentSo)
+}

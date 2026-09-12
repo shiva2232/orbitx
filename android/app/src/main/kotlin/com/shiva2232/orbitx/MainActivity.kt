@@ -12,6 +12,7 @@ import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.embedding.engine.dart.DartExecutor
 import kotlinx.coroutines.MainScope
 
 import android.net.ConnectivityManager
@@ -22,6 +23,8 @@ import frpwrapper.Frpwrapper
 import kotlin.concurrent.thread
 import kotlinx.coroutines.cancel
 import android.view.WindowManager
+
+import com.shiva2232.orbitx.PowerPresentWebViewFactory
 
 class MainActivity : FlutterActivity() {
     private val scope = MainScope()
@@ -108,6 +111,10 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "power_present_webview",
+            PowerPresentWebViewFactory(flutterEngine.dartExecutor.binaryMessenger),
+        )
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         methodChannel.setMethodCallHandler { call, result ->
             when (call.method) {
