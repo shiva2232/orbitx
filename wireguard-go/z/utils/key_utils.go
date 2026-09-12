@@ -31,9 +31,16 @@ type KeyUtils struct {
 	mu         sync.Mutex
 	conn       *net.UDPConn
 	keysPath   string
+	secret     string
 
 	OnStartVPN func(config string)
 	OnStopVPN  func()
+}
+
+func (k *KeyUtils) SetPresharedSecret(secret string) {
+	k.mu.Lock()
+	k.secret = secret
+	k.mu.Unlock()
 }
 
 type Keys struct {
@@ -153,9 +160,14 @@ func (k *KeyUtils) Rerun() {
 	c := k.current
 	privKey := k.privateKey
 	muIsHost := k.isHost
+	secret := k.secret
 	k.mu.Unlock()
 
 	if p == nil || c == nil || privKey == "" {
+		return
+	}
+	if p.PublicIP == "" || p.PublicPort <= 0 || p.WireguardPublicKey == "" {
+		fmt.Printf("[vpnengine] Peer data incomplete: endpoint=%s:%d publicKeyPresent=%t\n", p.PublicIP, p.PublicPort, p.WireguardPublicKey != "")
 		return
 	}
 
@@ -166,13 +178,17 @@ func (k *KeyUtils) Rerun() {
 	}
 
 	generator := &WireGuardConfigGenerator{}
-	config := generator.Generate(models.WireGuardPeer{
+	config := generator.GenerateWithPresharedKey(models.WireGuardPeer{
 		EndpointIP:    p.PublicIP,
 		EndpointPort:  p.PublicPort,
 		PeerPublicKey: p.WireguardPublicKey,
 		MyPrivateKey:  privKey,
 		MyAddress:     fmt.Sprintf("%s/32", internalIP),
-	}, "1.1.1.1", "0.0.0.0/0", 25)
+	}, "1.1.1.1", "10.0.0.1/32,10.0.0.2/32", 25, derivePresharedKey(k.uuid, secret))
+	if config == "" {
+		fmt.Println("[vpnengine] Failed to generate WireGuard configuration: invalid key encoding")
+		return
+	}
 
 	if k.OnStartVPN != nil {
 		k.OnStartVPN(config)
@@ -202,14 +218,19 @@ func (k *KeyUtils) StartPeerListener(ctx context.Context) {
 			case <-ticker.C:
 				var data map[string]interface{}
 				if err := query.Get(ctx, &data); err != nil {
+					fmt.Printf("[vpnengine] Firebase peer lookup failed: %v\n", err)
 					continue
 				}
 				if data == nil {
+					fmt.Printf("[vpnengine] No peer data at %s\n", path)
 					continue
 				}
 
 				k.mu.Lock()
-				prev := k.peer
+				var previous models.SignalingPeer
+				if k.peer != nil {
+					previous = *k.peer
+				}
 				k.peer = &models.SignalingPeer{
 					UID:                getString(data, "uid"),
 					PublicIP:           getString(data, "publicIp"),
@@ -219,10 +240,12 @@ func (k *KeyUtils) StartPeerListener(ctx context.Context) {
 					Online:             getBool(data, "online"),
 					NetworkType:        getString(data, "networkType"),
 				}
+				peer := *k.peer
 				k.mu.Unlock()
 
-				if prev == nil || k.peer.PublicIP != prev.PublicIP || k.peer.PublicPort != prev.PublicPort {
-					fmt.Printf("[vpnengine] Peer endpoint updated: %s:%d\n", k.peer.PublicIP, k.peer.PublicPort)
+				changed := previous.PublicIP == "" || peer.PublicIP != previous.PublicIP || peer.PublicPort != previous.PublicPort || peer.WireguardPublicKey != previous.WireguardPublicKey
+				if changed {
+					fmt.Printf("[vpnengine] Peer endpoint updated: %s:%d publicKeyPresent=%t\n", peer.PublicIP, peer.PublicPort, peer.WireguardPublicKey != "")
 					k.Rerun()
 				}
 			}

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -24,6 +25,16 @@ func (g *WireGuardConfigGenerator) Generate(
 	dns string,
 	allowedIPs string,
 	persistentKeepalive int,
+) string {
+	return g.GenerateWithPresharedKey(peer, dns, allowedIPs, persistentKeepalive, "")
+}
+
+func (g *WireGuardConfigGenerator) GenerateWithPresharedKey(
+	peer models.WireGuardPeer,
+	dns string,
+	allowedIPs string,
+	persistentKeepalive int,
+	presharedKey string,
 ) string {
 	if allowedIPs == "" {
 		allowedIPs = "0.0.0.0/0"
@@ -61,12 +72,28 @@ func (g *WireGuardConfigGenerator) Generate(
 	}
 
 	sb.WriteString(fmt.Sprintf("private_key=%s\n", priv))
-	sb.WriteString("replace_peers=true\n\n")
+	sb.WriteString("replace_peers=true\n")
 
 	sb.WriteString(fmt.Sprintf("public_key=%s\n", pub))
+	if presharedKey != "" {
+		sb.WriteString(fmt.Sprintf("preshared_key=%s\n", presharedKey))
+	}
 	sb.WriteString(fmt.Sprintf("endpoint=%s:%d\n", peer.EndpointIP, peer.EndpointPort))
 	sb.WriteString("replace_allowed_ips=true\n")
-	sb.WriteString(fmt.Sprintf("allowed_ip=%s\n", allowedIPs))
+	for _, allowedIP := range strings.Split(allowedIPs, ",") {
+		allowedIP = strings.TrimSpace(allowedIP)
+		if allowedIP != "" {
+			sb.WriteString(fmt.Sprintf("allowed_ip=%s\n", allowedIP))
+		}
+	}
 	sb.WriteString(fmt.Sprintf("persistent_keepalive_interval=%d\n", 15))
 	return sb.String()
+}
+
+func derivePresharedKey(pair, secret string) string {
+	if secret == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("orbitx/wireguard/psk/" + pair + "/" + secret))
+	return hex.EncodeToString(sum[:])
 }

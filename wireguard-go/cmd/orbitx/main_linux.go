@@ -40,6 +40,7 @@ func main() {
 	databaseURL := envOrDefault("ORBITX_DATABASE_URL", defaultDatabaseURL)
 	uuid := envOrDefault("ORBITX_UUID", "test123")
 	deviceName := envOrDefault("ORBITX_DEVICE_NAME", "orbitx-ubuntu")
+	presharedSecret := envOrDefault("ORBITX_PRESHARED_SECRET", "orbitx_p2p_default_secret")
 	interfaceName := envOrDefault("ORBITX_INTERFACE", "wg0")
 	filesDir := envOrDefault("ORBITX_DATA_DIR", filepath.Join(userHome(), ".orbitx"))
 
@@ -59,6 +60,7 @@ func main() {
 		uuid,
 		filepath.Join(filesDir, "orbitx_keys.json"),
 	)
+	keys.SetPresharedSecret(presharedSecret)
 	if err := keys.Init(); err != nil {
 		fatal(fmt.Errorf("initialize WireGuard keys: %w", err))
 	}
