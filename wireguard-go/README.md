@@ -1,7 +1,16 @@
 # Go Implementation of [WireGuard](https://www.wireguard.com/)
 
 This is an implementation of WireGuard in Go.
+```base
+cd ~/wireguard-go
+sudo pkill orbitx
+sudo ip link delete wg0 2>/dev/null || true
+rm -f ~/.orbitx/orbitx_keys.json
 
+bash build.orbitx.sh
+source ./orbitx.config.sh
+sudo -E ./orbitx -m client
+```
 ## Usage
 
 Most Linux kernel WireGuard users are used to adding an interface with `ip link add wg0 type wireguard`. With wireguard-go, instead simply run:

@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -60,7 +61,36 @@ func NewKeyUtils(db *db.Client, isHost bool, deviceName string, uuid string, key
 }
 
 func (k *KeyUtils) Init() error {
+	if k.secret != "" {
+		return k.deriveAndSaveKey()
+	}
 	return k.saveOrGetKey()
+}
+
+func (k *KeyUtils) deriveAndSaveKey() error {
+	role := "slave"
+	if k.isHost {
+		role = "master"
+	}
+	seed := sha256.Sum256([]byte("orbitx/wireguard/private/" + k.uuid + "/" + role + "/" + k.secret))
+	seed[0] &= 248
+	seed[31] &= 127
+	seed[31] |= 64
+
+	var public [32]byte
+	curve25519.ScalarBaseMult(&public, &seed)
+	k.privateKey = base64.StdEncoding.EncodeToString(seed[:])
+	k.publicKey = base64.StdEncoding.EncodeToString(public[:])
+
+	filename := k.keysPath
+	if filename == "" {
+		filename = "orbitx_keys.json"
+	}
+	data, err := json.Marshal(Keys{PrivateKey: k.privateKey, PublicKey: k.publicKey})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filename, data, 0600)
 }
 
 func (k *KeyUtils) generateKey() (string, string, error) {

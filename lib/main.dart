@@ -955,16 +955,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       ),
       floatingActionButton: GestureDetector(
         onLongPress: () {
-          setState(() {
-            showLay = !showLay;
-          });
+            Navigator.of(context).pushNamed('/present');
         },
         child: FloatingActionButton(
           onPressed: () async {
-            Navigator.of(context).pushNamed('/present');
+          setState(() {
+            showLay = !showLay;
+          });
           },
           mini: true,
-          tooltip: 'Open Power Present',
+          tooltip: 'VPN Status',
           child: const Icon(Icons.present_to_all),
         ),
       ),
@@ -1088,7 +1088,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     // await Clipboard.setData(ClipboardData(text: pairingHash));
     // return pairingHash;
     final sharedPreferences = await SharedPreferences.getInstance();
-    return sharedPreferences.getString('uuid')??'af9aa286-d101-47b8-b799-2fa16d660e84';
+    return sharedPreferences.getString('uuid')??'af9aa286-d101-47b8-b799-2fa16d660e83';
   }
 
   Future<void> _setVpnEnabled(bool enabled) async {
@@ -1110,7 +1110,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final ok = await controller.requestPermissionAndStart(
       pairingHash,
       currentRole,
-      'presharedSecret',
+      'orbitx_p2p_default_secret',
     );
     if (!ok) {
       debugPrint("ok is $ok");
