@@ -203,7 +203,10 @@ func (device *Device) RoutineReceiveIncoming(maxBatchSize int, recv conn.Receive
 				}
 
 			default:
-				device.log.Verbosef("Received message with unknown type")
+				device.log.Verbosef("Received UDP packet with unknown WireGuard type from %s (length=%d, type=%d)", endpoints[i].DstToString(), len(packet), msgType)
+				if device.UnknownPacketHandler != nil {
+					device.UnknownPacketHandler(endpoints[i])
+				}
 				continue
 			}
 

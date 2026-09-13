@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 
 	firebase "firebase.google.com/go/v4"
@@ -87,6 +88,15 @@ func main() {
 
 	logger := device.NewLogger(device.LogLevelVerbose, "ORBITX: ")
 	wgDevice := device.NewDevice(tunDevice, bind, logger)
+	var restartOnce sync.Once
+	wgDevice.UnknownPacketHandler = func(_ conn.Endpoint) {
+		restartOnce.Do(func() {
+			logger.Errorf("Unknown UDP packet detected; restarting Linux VPN with the current privilege and environment")
+			if err := restartCurrentProcess(); err != nil {
+				logger.Errorf("Failed to restart Linux VPN: %v", err)
+			}
+		})
+	}
 	if err := wgDevice.Up(); err != nil {
 		fatal(fmt.Errorf("start WireGuard device: %w", err))
 	}
@@ -171,6 +181,14 @@ func userHome() string {
 		return home
 	}
 	return "."
+}
+
+func restartCurrentProcess() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	return syscall.Exec(executable, os.Args, os.Environ())
 }
 
 func fatal(err error) {

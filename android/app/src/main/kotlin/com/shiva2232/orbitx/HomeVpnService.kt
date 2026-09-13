@@ -28,6 +28,7 @@ class HomeVpnService : VpnService() {
     private var tunnelJob: Job? = null
     private var statusJob: Job? = null
     private var activeTunFd: Int = -1
+    private var restartInProgress = false
     private val networkCallback = NetworkChangeReceiver()
 
     override fun onCreate() {
@@ -68,6 +69,7 @@ class HomeVpnService : VpnService() {
             // Cancel any pending startup or status observation from a previous session
             tunnelJob?.cancel()
             statusJob?.cancel()
+            restartInProgress = false
             
             tunnelJob = serviceScope.launch {
                 startTunnel(uuid, role, secret)
@@ -130,7 +132,7 @@ class HomeVpnService : VpnService() {
                 VpnBridge.startEngine(uuid, normalizedRole, secret)
                 
                 sendBroadcast(Intent("com.shiva2232.orbitx.TUN_READY").setPackage(packageName))
-                observeEngineStatus()
+                observeEngineStatus(uuid, normalizedRole, secret)
                 Log.i(TAG, "Native engine started successfully")
             } catch (t: Throwable) {
                 Log.e(TAG, "Native engine startup failed", t)
@@ -147,13 +149,24 @@ class HomeVpnService : VpnService() {
         }
     }
 
-    private fun observeEngineStatus() {
+    private fun observeEngineStatus(uuid: String, role: String, secret: String) {
         statusJob?.cancel()
         statusJob = serviceScope.launch {
             var lastEndpoint = ""
             while (isActive && activeTunFd != -1) {
                 try {
                     val status = VpnBridge.getStatusJSON().orEmpty()
+                    if (!restartInProgress && status.contains("\"restartRequested\":true")) {
+                        restartInProgress = true
+                        Log.w(TAG, "Native VPN requested restart after an unknown UDP packet")
+                        serviceScope.launch {
+                            cleanupNativeOnly()
+                            delay(250)
+                            startTunnel(uuid, role, secret)
+                            restartInProgress = false
+                        }
+                        return@launch
+                    }
                     if (status.contains("\"state\":\"CONNECTED\"")) {
                         val endpoint = status.substringAfter("\"peerIp\":\"").substringBefore('"') + ":" +
                             status.substringAfter("\"peerPort\":").takeWhile { it.isDigit() }

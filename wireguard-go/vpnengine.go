@@ -215,11 +215,19 @@ func StartEngine(cpair *C.char, crole *C.char, csecret *C.char) C.int {
 	}
 	logger := device.NewLogger(device.LogLevelVerbose, "VPN_GO: ")
 	wgDev := device.NewDevice(tunDev, bind, logger)
+	var restartOnce sync.Once
+	wgDev.UnknownPacketHandler = func(_ conn.Endpoint) {
+		restartOnce.Do(func() {
+			log.Printf("[vpnengine] Unknown UDP packet detected; requesting Android VPN restart")
+			updateStatus(map[string]interface{}{"restartRequested": true})
+		})
+	}
 
 	mu.Lock()
 	wgDevice = wgDev
 	stunBind = stdBind
 	status["state"] = "CONNECTING"
+	status["restartRequested"] = false
 	mu.Unlock()
 
 	if err := wgDev.IpcSet("listen_port=0\n"); err != nil {
